@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Price stats{% endblock %}
+{% block content %}
+<h1>Sold price stats</h1>
+{% include "_filters.html" %}
+
+<div class="stats-row">
+  <div class="stat"><b>{{ s.overall.listings }}</b><span>listings</span></div>
+  <div class="stat"><b>{{ s.overall.median|money }}</b><span>median</span></div>
+  <div class="stat"><b>{{ s.overall.avg|money }}</b><span>average</span></div>
+</div>
+
+<h2>By {{ s.group_by }}</h2>
+{% set top = (s.groups|map(attribute='median')|max) if s.groups else 0 %}
+<div class="panel table-scroll">
+<table>
+  <thead><tr><th>{{ s.group_by }}</th><th class="num">Sold</th><th class="num">Median</th><th class="num">Avg</th><th class="num">Low</th><th class="num">High</th><th style="width:25%"></th></tr></thead>
+  <tbody>
+  {% for g in s.groups %}
+    <tr>
+      <td>{% if g.name != '(unknown)' and s.group_by != 'vintage' %}<a href="{{ url_for('browse', **dict(filters, **{s.group_by: g.name})) }}">{{ g.name }}</a>{% else %}{{ g.name }}{% endif %}</td>
+      <td class="num">{{ g.count }}</td>
+      <td class="num">{{ g.median|money }}</td>
+      <td class="num">{{ g.avg|money }}</td>
+      <td class="num">{{ g.min|money }}</td>
+      <td class="num">{{ g.max|money }}</td>
+      <td><div class="bar" style="width: {{ (100 * g.median / top) if top else 0 }}%"></div></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">No priced listings yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if s.trend %}
+<h2>Median price by month sold</h2>
+{% set tmax = s.trend|map(attribute='median')|max %}
+<div class="panel table-scroll">
+<table>
+  <thead><tr><th>Month</th><th class="num">Sold</th><th class="num">Median</th><th style="width:50%"></th></tr></thead>
+  <tbody>
+  {% for t in s.trend %}
+    <tr><td>{{ t.month }}</td><td class="num">{{ t.count }}</td><td class="num">{{ t.median|money }}</td>
+      <td><div class="bar" style="width: {{ (100 * t.median / tmax) if tmax else 0 }}%"></div></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

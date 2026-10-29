@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Browse{% endblock %}
+{% block content %}
+<h1>Sold clothing database</h1>
+<div class="stats-row">
+  <div class="stat"><b>{{ total }}</b><span>listings</span></div>
+  <div class="stat"><b>{{ summary.median|money }}</b><span>median sold price</span></div>
+  <div class="stat"><b>{{ summary.avg|money }}</b><span>average</span></div>
+  <div class="stat"><b>{{ summary.min|money }} – {{ summary.max|money }}</b><span>range</span></div>
+</div>
+
+{% include "_filters.html" %}
+
+<div class="actions" style="margin-bottom:14px">
+  <form method="get" class="actions">
+    {% for k, v in args.items() if k != 'sort' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <label style="margin:0">Sort</label>
+    <select name="sort" onchange="this.form.submit()" style="width:auto">
+      {% for key in sorts %}<option value="{{ key }}" {{ 'selected' if (filters.sort or 'newest') == key }}>{{ key.replace('_', ' ')|capitalize }}</option>{% endfor %}
+    </select>
+  </form>
+  <a class="btn secondary" href="{{ url_for('export_csv', **args) }}">Export CSV</a>
+</div>
+
+{% if not rows %}
+  <div class="panel">
+    {% if total == 0 and not filters %}
+      No listings yet. <a href="{{ url_for('add') }}">Add some eBay sold URLs</a> to start building the database.
+    {% else %}
+      No listings match these filters.
+    {% endif %}
+  </div>
+{% else %}
+<div class="grid">
+  {% for r in rows %}
+  <a class="card" href="{{ url_for('listing', listing_id=r.id) }}">
+    {% if r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="noimg"></div>{% endif %}
+    <div class="body">
+      <div class="price">{{ r.price|money(r.currency) }}</div>
+      <div class="title">{{ r.title }}</div>
+      <div class="tags">
+        {% for v in [r.brand, r.category, r.size, r.color] if v %}<span class="tag">{{ v }}</span>{% endfor %}
+        {% if r.vintage %}<span class="tag v">Vintage{% if r.era %} · {{ r.era }}{% endif %}</span>{% endif %}
+      </div>
+      <div class="muted" style="font-size:12px">{% if r.sold_date %}Sold {{ r.sold_date }}{% endif %}{% if r.condition %} · {{ r.condition }}{% endif %}</div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn secondary" href="{{ url_for('browse', page=page-1, **args) }}">← Prev</a>{% endif %}
+  <span class="muted">Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a class="btn secondary" href="{{ url_for('browse', page=page+1, **args) }}">Next →</a>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

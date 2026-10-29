@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Datasell{% endblock %} · Datasell</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="logo" href="{{ url_for('browse') }}">Datasell</a>
+    <nav>
+      <a href="{{ url_for('browse') }}" class="{{ 'active' if request.endpoint == 'browse' }}">Browse</a>
+      <a href="{{ url_for('add') }}" class="{{ 'active' if request.endpoint == 'add' }}">Add sold URLs</a>
+      <a href="{{ url_for('stats_page') }}" class="{{ 'active' if request.endpoint == 'stats_page' }}">Price stats</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}
+    <div class="flash {{ cat }}">{{ msg }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Add sold URLs{% endblock %}
+{% block content %}
+<h1>Add eBay sold listings</h1>
+<form class="panel" method="post">
+  <label>eBay URLs, one per line</label>
+  <textarea name="urls" placeholder="https://www.ebay.com/sch/i.html?_nkw=vintage+levis+501&LH_Sold=1&LH_Complete=1&#10;https://www.ebay.com/itm/123456789012"></textarea>
+  <p class="muted" style="font-size:13px">
+    Use a <b>sold search</b> URL (search eBay, tick "Sold items" under filters, copy the address) to grab a whole
+    page of results, or a <b>single item</b> URL for full item specifics (brand, size, material…).
+    Sold/completed filters are added automatically to search URLs.
+  </p>
+  <div class="actions">
+    <div style="width:180px"><label>Search pages to scrape</label><input type="number" name="pages" min="1" max="10" value="1"></div>
+  </div>
+  <details style="margin-top:14px">
+    <summary>eBay blocked the request? Paste the page HTML instead</summary>
+    <p class="muted" style="font-size:13px">Open the URL in your browser, right-click → "View page source", select all, copy,
+      and paste it here. Put the page's URL in the box above (optional, helps detect the page type).</p>
+    <textarea name="html" placeholder="<!DOCTYPE html>…"></textarea>
+  </details>
+  <div style="margin-top:14px"><button>Scrape &amp; save</button></div>
+</form>
+{% endblock %}

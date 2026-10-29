@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ r.title[:40] }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('browse') }}">← Back to browse</a></p>
+<div class="detail">
+  <div>
+    {% if r.image_url %}<img src="{{ r.image_url }}" alt="" referrerpolicy="no-referrer">{% endif %}
+    <p>{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">View on eBay ↗</a>{% endif %}</p>
+    <p class="muted" style="font-size:13px">Item #{{ r.item_id or '—' }} · added {{ r.scraped_at[:10] }}</p>
+  </div>
+  <div>
+    <h1>{{ r.title }}</h1>
+    <div class="stats-row">
+      <div class="stat"><b>{{ r.price|money(r.currency) }}</b><span>sold price</span></div>
+      <div class="stat"><b>{{ r.shipping|money(r.currency) if r.shipping is not none else '—' }}</b><span>shipping</span></div>
+      <div class="stat"><b>{{ r.sold_date or '—' }}</b><span>sold date</span></div>
+    </div>
+
+    <form class="panel" method="post">
+      <h2 style="margin-top:0">Attributes <span class="muted" style="font-weight:400;font-size:13px">— fix anything the parser got wrong</span></h2>
+      <div class="form-grid">
+        {% for f in editable %}
+        <div class="{{ 'full' if f == 'title' }}"><label>{{ f.replace('_', ' ')|capitalize }}</label>
+          <input name="{{ f }}" value="{{ r[f] if r[f] is not none else '' }}" {% if f == 'price' %}type="number" step="0.01"{% elif f == 'sold_date' %}type="date"{% endif %}></div>
+        {% endfor %}
+        <div><label><input type="checkbox" name="vintage" {{ 'checked' if r.vintage }}> Vintage</label></div>
+      </div>
+      <div style="margin-top:12px"><button>Save changes</button></div>
+    </form>
+
+    {% if r.specifics %}
+    <div class="panel">
+      <h2 style="margin-top:0">eBay item specifics</h2>
+      <table>{% for k, v in r.specifics.items() %}<tr><th style="width:35%">{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}</table>
+    </div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('delete_listing', listing_id=r.id) }}" onsubmit="return confirm('Delete this listing?')">
+      <button class="danger">Delete listing</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
