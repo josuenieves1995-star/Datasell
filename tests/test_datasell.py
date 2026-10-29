@@ -196,3 +196,97 @@ def test_api_scrape_validation(client):
     assert client.post("/api/scrape", json={}).status_code == 400
     r = client.post("/api/scrape", json={"urls": ["https://example.com/x"]}).get_json()
     assert r["errors"] and "eBay" in r["errors"][0]
+
+
+# ---------------------------------------------------------------- $30 minimum + daily updates
+
+from datetime import datetime, timezone  # noqa: E402
+
+from datasell import daily, scraper  # noqa: E402
+
+
+def test_min_price_filter(conn):
+    cheap = {"item_id": "1", "title": "Cheap tee", "price": 29.99}
+    no_price = {"item_id": "2", "title": "Unknown price"}
+    ok = {"item_id": "3", "title": "Good jacket", "price": 30.0}
+    counts = db.save_many(conn, [cheap, no_price, ok])
+    assert counts["added"] == 1 and counts["below_min"] == 2
+    assert db.save_many(conn, [cheap], min_price=0)["added"] == 1
+    assert db.prune_below(conn) == 1
+    assert [r["item_id"] for r in db.query(conn)[0]] == ["3"]
+
+
+def test_search_url_gets_min_price_and_newest_sort():
+    url = ensure_sold_filter("https://www.ebay.com/sch/i.html?_nkw=levis", 30)
+    assert "_udlo=30" in url and "_sop=13" in url
+    # A price the user already set in the URL is kept.
+    assert "_udlo=50" in ensure_sold_filter("https://www.ebay.com/sch/i.html?_nkw=x&_udlo=50", 30)
+
+
+def test_scrape_stops_paging_when_nothing_new(monkeypatch):
+    calls = []
+
+    def fake_fetch(url, session=None, timeout=20):
+        calls.append(url)
+        return load("search_s_card.html")
+
+    monkeypatch.setattr(scraper, "fetch", fake_fetch)
+    res = scraper.scrape_url("https://www.ebay.com/sch/i.html?_nkw=x", pages=5, delay=0,
+                             known_ids={"306111222333", "306444555666"})
+    assert len(calls) == 1 and len(res) == 2
+    calls.clear()
+    scraper.scrape_url("https://www.ebay.com/sch/i.html?_nkw=x", pages=3, delay=0, known_ids=set())
+    assert len(calls) == 3
+
+
+def test_is_due():
+    tz = timezone.utc
+    at = "23:30"
+    before = datetime(2026, 10, 29, 22, 0, tzinfo=tz)
+    after = datetime(2026, 10, 29, 23, 45, tzinfo=tz)
+    next_morning = datetime(2026, 10, 30, 9, 0, tzinfo=tz)
+    assert daily.is_due(before, None, at)                               # never ran: run now
+    assert not daily.is_due(before, "2026-10-28T23:30:05+00:00", at)   # last night's ran, wait
+    assert daily.is_due(after, "2026-10-28T23:30:05+00:00", at)        # tonight's is due
+    assert not daily.is_due(after, "2026-10-29T23:30:05+00:00", at)    # already ran tonight
+    # App was off last night (last run two nights ago): catch up in the morning.
+    assert daily.is_due(next_morning, "2026-10-28T23:30:05+00:00", at)
+    assert not daily.is_due(next_morning, "2026-10-29T23:31:00+00:00", at)
+    assert daily.next_run_time(before, at) == datetime(2026, 10, 29, 23, 30, tzinfo=tz)
+    assert daily.next_run_time(after, at) == datetime(2026, 10, 30, 23, 30, tzinfo=tz)
+
+
+def test_run_saved_searches(tmp_path):
+    path = str(tmp_path / "d.db")
+    c = db.connect(path)
+    db.add_search(c, "https://www.ebay.com/sch/i.html?_nkw=a", 2, "A")
+    db.add_search(c, "https://www.ebay.com/sch/i.html?_nkw=b", 2, "B")
+    assert not db.add_search(c, "https://www.ebay.com/sch/i.html?_nkw=a")  # no duplicates
+    c.close()
+    seen = []
+
+    def fake_scrape(url, pages, min_price, known_ids):
+        seen.append((url, pages, min_price))
+        if url.endswith("=b"):
+            raise scraper.BlockedError("bot check")
+        return parse_html(load("search_s_item.html")) + [{"item_id": "9", "title": "Cheap", "price": 5.0}]
+
+    r = daily.run_saved_searches(path, "schedule", scrape=fake_scrape, delay_between=0)
+    assert seen[0] == ("https://www.ebay.com/sch/i.html?_nkw=a", 2, 30.0)
+    assert (r["searches"], r["added"], r["below_min"], len(r["errors"])) == (2, 2, 1, 1)
+    c = db.connect(path)
+    a, b = db.list_searches(c)
+    assert a["last_added"] == 2 and a["last_error"] is None and "bot check" in b["last_error"]
+    assert db.last_scheduled_run(c)["added"] == 2
+    c.close()
+
+
+def test_searches_page(client):
+    assert b"No saved searches" in client.get("/searches").data
+    r = client.post("/searches", data={"url": "https://www.ebay.com/sch/i.html?_nkw=nike", "pages": "2"},
+                    follow_redirects=True)
+    assert b"Search saved" in r.data and b"_nkw=nike" in r.data
+    assert b"doesn" in client.post("/searches", data={"url": "https://example.com"}, follow_redirects=True).data
+    # Pasting HTML on the Add page applies the $30 minimum.
+    r = client.post("/add", data={"html": load("search_s_card.html")}, follow_redirects=True)
+    assert b"2 added" in r.data

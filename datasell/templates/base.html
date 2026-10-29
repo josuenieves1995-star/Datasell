@@ -13,6 +13,7 @@
     <nav>
       <a href="{{ url_for('browse') }}" class="{{ 'active' if request.endpoint == 'browse' }}">Browse</a>
       <a href="{{ url_for('add') }}" class="{{ 'active' if request.endpoint == 'add' }}">Add sold URLs</a>
+      <a href="{{ url_for('searches') }}" class="{{ 'active' if request.endpoint == 'searches' }}">Daily updates</a>
       <a href="{{ url_for('stats_page') }}" class="{{ 'active' if request.endpoint == 'stats_page' }}">Price stats</a>
     </nav>
   </div>

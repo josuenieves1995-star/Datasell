@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 
 from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import db
-from .scraper import ScrapeError, parse_html, scrape_url
+from . import daily, db
+from .scraper import ScrapeError, is_search_url, parse_html, scrape_url
 
 PER_PAGE = 48
 EDITABLE = ["title", "price", "sold_date", "brand", "category", "department", "size",
@@ -19,6 +20,8 @@ def create_app(db_path: str | None = None) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("DATASELL_SECRET", "dev-only-change-me")
     app.config["DB_PATH"] = db_path or db.DEFAULT_DB
+    app.config["DAILY_AT"] = daily.DAILY_AT
+    app.config["SCHEDULER_ON"] = False  # set by start_scheduler()
 
     def conn():
         if "conn" not in g:
@@ -35,12 +38,16 @@ def create_app(db_path: str | None = None) -> Flask:
         keys = ["q", "sort", "min_price", "max_price", "vintage", "date_from", "date_to"] + db.FILTERABLE
         return {k: request.args.get(k, "").strip() for k in keys if request.args.get(k, "").strip()}
 
+    @app.context_processor
+    def globals_():
+        return {"min_price": db.MIN_PRICE}
+
     def run_scrape(urls: list[str], pages: int) -> tuple[dict, list[str]]:
-        totals = {"added": 0, "updated": 0, "skipped": 0}
+        totals = {"added": 0, "updated": 0, "skipped": 0, "below_min": 0}
         errors = []
         for u in urls:
             try:
-                counts = db.save_many(conn(), scrape_url(u, pages=pages))
+                counts = db.save_many(conn(), scrape_url(u, pages=pages, min_price=db.MIN_PRICE))
                 for k in totals:
                     totals[k] += counts[k]
             except ScrapeError as e:
@@ -72,19 +79,73 @@ def create_app(db_path: str | None = None) -> Flask:
                 try:
                     listings = parse_html(html, urls[0] if urls else None)
                     counts = db.save_many(conn(), listings)
-                    flash(f"Parsed pasted HTML: {counts['added']} added, {counts['updated']} updated.", "ok")
+                    flash(f"Parsed pasted HTML: {counts['added']} added, {counts['updated']} updated, "
+                          f"{counts['below_min']} under ${db.MIN_PRICE:g} ignored.", "ok")
                 except ScrapeError as e:
                     flash(str(e), "error")
             elif urls:
+                if request.form.get("save_daily"):
+                    saved = sum(db.add_search(conn(), u, pages) for u in urls if is_search_url(u))
+                    if saved:
+                        flash(f"Saved {saved} search(es) for the daily update.", "ok")
                 counts, errors = run_scrape(urls, pages)
                 flash(f"{counts['added']} added, {counts['updated']} updated, "
-                      f"{counts['skipped']} skipped from {len(urls)} URL(s).", "ok" if not errors else "warn")
+                      f"{counts['below_min']} under ${db.MIN_PRICE:g} ignored, from {len(urls)} URL(s).",
+                      "ok" if not errors else "warn")
                 for e in errors:
                     flash(e, "error")
             else:
                 flash("Enter at least one eBay URL or paste page HTML.", "error")
             return redirect(url_for("add"))
         return render_template("add.html")
+
+    # ------------------------------------------------------------ daily updates
+
+    def start_background_run() -> bool:
+        if daily.is_running():
+            return False
+        threading.Thread(target=daily.run_saved_searches,
+                         args=(app.config["DB_PATH"], "manual"), daemon=True).start()
+        return True
+
+    @app.route("/searches", methods=["GET", "POST"])
+    def searches():
+        if request.method == "POST":
+            url = request.form.get("url", "").strip()
+            pages = max(1, min(10, request.form.get("pages", 3, type=int) or 3))
+            if not is_search_url(url) or "ebay." not in url:
+                flash("That doesn't look like an eBay search URL.", "error")
+            elif db.add_search(conn(), url, pages, request.form.get("name", "").strip() or None):
+                flash("Search saved. It will be pulled in the next daily update.", "ok")
+            else:
+                flash("That search is already saved.", "warn")
+            return redirect(url_for("searches"))
+        nxt = daily.next_run_time(daily._now(daily.TZ), app.config["DAILY_AT"])
+        return render_template("searches.html", searches=db.list_searches(conn()),
+                               runs=db.recent_runs(conn()), next_run=nxt,
+                               scheduler_on=app.config["SCHEDULER_ON"], running=daily.is_running(),
+                               daily_at=app.config["DAILY_AT"])
+
+    @app.post("/searches/<int:search_id>/toggle")
+    def toggle_search(search_id: int):
+        row = conn().execute("SELECT active FROM searches WHERE id = ?", (search_id,)).fetchone()
+        if row:
+            db.update_search(conn(), search_id, active=0 if row["active"] else 1)
+        return redirect(url_for("searches"))
+
+    @app.post("/searches/<int:search_id>/delete")
+    def delete_search(search_id: int):
+        db.delete_search(conn(), search_id)
+        flash("Search removed.", "ok")
+        return redirect(url_for("searches"))
+
+    @app.post("/searches/run")
+    def run_now():
+        if start_background_run():
+            flash("Pulling all saved searches now. Refresh in a minute to see the results.", "ok")
+        else:
+            flash("An update is already running.", "warn")
+        return redirect(url_for("searches"))
 
     @app.route("/stats")
     def stats_page():
@@ -156,6 +217,10 @@ def create_app(db_path: str | None = None) -> Flask:
         counts, errors = run_scrape(urls, max(1, min(10, int(data.get("pages", 1)))))
         return jsonify(counts=counts, errors=errors)
 
+    @app.post("/api/run-daily")
+    def api_run_daily():
+        return jsonify(started=start_background_run())
+
     @app.template_filter("money")
     def money(v, currency=None):
         if v is None:
@@ -164,6 +229,13 @@ def create_app(db_path: str | None = None) -> Flask:
         return f"{sym}{v:,.2f}"
 
     return app
+
+
+def start_scheduler(app: Flask) -> daily.DailyScheduler:
+    sched = daily.DailyScheduler(app.config["DB_PATH"], at=app.config["DAILY_AT"])
+    sched.start()
+    app.config["SCHEDULER_ON"] = True
+    return sched
 
 
 app = create_app()

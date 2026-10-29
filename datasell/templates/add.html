@@ -11,8 +11,10 @@
     Sold/completed filters are added automatically to search URLs.
   </p>
   <div class="actions">
-    <div style="width:180px"><label>Search pages to scrape</label><input type="number" name="pages" min="1" max="10" value="1"></div>
+    <div style="width:180px"><label>Search pages to scrape</label><input type="number" name="pages" min="1" max="10" value="3"></div>
+    <div><label><input type="checkbox" name="save_daily" value="1" checked> Save search URLs for daily updates</label></div>
   </div>
+  <p class="muted" style="font-size:13px">Only sales of <b>${{ '%g' % min_price }} or more</b> are kept.</p>
   <details style="margin-top:14px">
     <summary>eBay blocked the request? Paste the page HTML instead</summary>
     <p class="muted" style="font-size:13px">Open the URL in your browser, right-click → "View page source", select all, copy,

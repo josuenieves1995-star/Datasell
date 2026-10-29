@@ -66,3 +66,7 @@ details summary { cursor: pointer; font-weight: 600; }
   .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .filters .wide { grid-column: 1 / -1; }
 }
+.search-row { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.search-row:last-child { border-bottom: 0; }
+.search-name { font-weight: 600; overflow-wrap: anywhere; }
+.flash { overflow-wrap: anywhere; }

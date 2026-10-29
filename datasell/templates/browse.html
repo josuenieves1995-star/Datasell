@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Browse{% endblock %}
 {% block content %}
-<h1>Sold clothing database</h1>
+<h1>Sold clothing database <span class="muted" style="font-size:14px;font-weight:400">· ${{ '%g' % min_price }}+ sales</span></h1>
 <div class="stats-row">
   <div class="stat"><b>{{ total }}</b><span>listings</span></div>
   <div class="stat"><b>{{ summary.median|money }}</b><span>median sold price</span></div>

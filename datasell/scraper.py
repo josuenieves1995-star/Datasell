@@ -128,12 +128,19 @@ def is_search_url(url: str) -> bool:
     return "/sch/" in p.path or "_nkw" in p.query or "/b/" in p.path
 
 
-def ensure_sold_filter(url: str) -> str:
-    """Make sure a search URL only returns sold, completed listings."""
+def ensure_sold_filter(url: str, min_price: float | None = None) -> str:
+    """Make sure a search URL only returns sold, completed listings.
+
+    Also asks eBay for sales at or above `min_price` (`_udlo`) and for the
+    most recently ended first (`_sop=13`), unless the URL already sets them.
+    """
     p = urlparse(url)
     q = parse_qs(p.query, keep_blank_values=True)
     q["LH_Sold"] = ["1"]
     q["LH_Complete"] = ["1"]
+    if min_price and not q.get("_udlo", [""])[0]:
+        q["_udlo"] = [f"{min_price:g}"]
+    q.setdefault("_sop", ["13"])
     return urlunparse(p._replace(query=urlencode(q, doseq=True)))
 
 
@@ -355,7 +362,8 @@ def fetch(url: str, session: requests.Session | None = None, timeout: int = 20) 
     try:
         resp = s.get(url, headers=HEADERS, timeout=timeout)
     except requests.RequestException as e:
-        raise ScrapeError(f"Could not reach eBay: {e}") from e
+        kind = "timed out" if isinstance(e, requests.Timeout) else "network error"
+        raise ScrapeError(f"Could not reach eBay ({kind}). Check your internet connection.") from e
     if resp.status_code >= 400:
         raise ScrapeError(f"eBay returned HTTP {resp.status_code} for {url}")
     html = resp.text
@@ -368,8 +376,13 @@ def fetch(url: str, session: requests.Session | None = None, timeout: int = 20) 
 
 
 def scrape_url(url: str, pages: int = 1, delay: float = 1.5,
-               session: requests.Session | None = None) -> list[dict]:
-    """Scrape a sold search URL (optionally several pages) or an item URL."""
+               session: requests.Session | None = None, min_price: float | None = None,
+               known_ids: set[str] | None = None) -> list[dict]:
+    """Scrape a sold search URL (optionally several pages) or an item URL.
+
+    With `known_ids`, paging stops early once a page has nothing new, which
+    keeps the daily update fast (results are sorted newest first).
+    """
     url = url.strip()
     if not re.match(r"https?://", url):
         raise ScrapeError("URL must start with http:// or https://")
@@ -378,7 +391,7 @@ def scrape_url(url: str, pages: int = 1, delay: float = 1.5,
     session = session or requests.Session()
 
     if is_search_url(url):
-        url = ensure_sold_filter(url)
+        url = ensure_sold_filter(url, min_price)
         results: list[dict] = []
         for page in range(1, max(1, pages) + 1):
             page_url = url if page == 1 else with_page(url, page)
@@ -386,6 +399,8 @@ def scrape_url(url: str, pages: int = 1, delay: float = 1.5,
             if not page_results:
                 break
             results.extend(page_results)
+            if known_ids is not None and all(r["item_id"] in known_ids for r in page_results):
+                break
             if page < pages:
                 time.sleep(delay)
         return results

@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from statistics import median
 
 DEFAULT_DB = os.environ.get("DATASELL_DB", "datasell.db")
+# Only keep sales at or above this price (sold price, not counting shipping).
+MIN_PRICE = float(os.environ.get("DATASELL_MIN_PRICE", "30"))
 
 COLUMNS = [
     "item_id", "url", "title", "price", "currency", "shipping", "sold_date",
@@ -47,6 +49,32 @@ CREATE TABLE IF NOT EXISTS listings (
 CREATE INDEX IF NOT EXISTS idx_brand ON listings(brand);
 CREATE INDEX IF NOT EXISTS idx_category ON listings(category);
 CREATE INDEX IF NOT EXISTS idx_sold_date ON listings(sold_date);
+
+-- Search URLs that get re-scraped by the daily job.
+CREATE TABLE IF NOT EXISTS searches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL UNIQUE,
+    name        TEXT,
+    pages       INTEGER NOT NULL DEFAULT 3,
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    last_run_at TEXT,
+    last_added  INTEGER,
+    last_error  TEXT
+);
+
+-- One row per daily (or manual "run now") pull.
+CREATE TABLE IF NOT EXISTS runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    trigger     TEXT,
+    searches    INTEGER DEFAULT 0,
+    added       INTEGER DEFAULT 0,
+    updated     INTEGER DEFAULT 0,
+    below_min   INTEGER DEFAULT 0,
+    errors      TEXT
+);
 """
 
 FILTERABLE = ["brand", "category", "department", "size", "color", "material", "condition", "era"]
@@ -70,10 +98,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def upsert(conn: sqlite3.Connection, listing: dict) -> str:
-    """Insert or update a listing. Returns 'added', 'updated' or 'skipped'."""
+def upsert(conn: sqlite3.Connection, listing: dict, min_price: float | None = None) -> str:
+    """Insert or update a listing.
+
+    Returns 'added', 'updated', 'skipped' (no title) or 'below_min' (price
+    missing or under `min_price`, which defaults to MIN_PRICE).
+    """
     if not listing.get("title"):
         return "skipped"
+    floor = MIN_PRICE if min_price is None else min_price
+    if floor > 0 and (listing.get("price") is None or listing["price"] < floor):
+        return "below_min"
     row = {c: listing.get(c) for c in COLUMNS}
     row["vintage"] = 1 if row.get("vintage") else 0
     row["specifics"] = json.dumps(listing.get("specifics") or {})
@@ -104,11 +139,77 @@ def upsert(conn: sqlite3.Connection, listing: dict) -> str:
     return "added"
 
 
-def save_many(conn: sqlite3.Connection, listings: list[dict]) -> dict:
-    counts = {"added": 0, "updated": 0, "skipped": 0}
+def save_many(conn: sqlite3.Connection, listings: list[dict], min_price: float | None = None) -> dict:
+    counts = {"added": 0, "updated": 0, "skipped": 0, "below_min": 0}
     for listing in listings:
-        counts[upsert(conn, listing)] += 1
+        counts[upsert(conn, listing, min_price)] += 1
     return counts
+
+
+def known_item_ids(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT item_id FROM listings WHERE item_id IS NOT NULL")}
+
+
+def prune_below(conn: sqlite3.Connection, min_price: float | None = None) -> int:
+    """Delete stored listings under the minimum price. Returns how many."""
+    floor = MIN_PRICE if min_price is None else min_price
+    cur = conn.execute("DELETE FROM listings WHERE price IS NULL OR price < ?", (floor,))
+    conn.commit()
+    return cur.rowcount
+
+
+# ---------------------------------------------------------------- saved searches
+
+def add_search(conn: sqlite3.Connection, url: str, pages: int = 3, name: str | None = None) -> bool:
+    """Save a search URL for daily updates. Returns False if it was already saved."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO searches (url, name, pages, created_at) VALUES (?, ?, ?, ?)",
+        (url, name, max(1, min(10, pages)), _now()))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def list_searches(conn: sqlite3.Connection, active_only: bool = False) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM searches" + (" WHERE active = 1" if active_only else "") + " ORDER BY id"
+    return conn.execute(sql).fetchall()
+
+
+def update_search(conn: sqlite3.Connection, search_id: int, **fields) -> None:
+    allowed = {k: v for k, v in fields.items()
+               if k in ("name", "pages", "active", "last_run_at", "last_added", "last_error")}
+    if allowed:
+        sets = ", ".join(f"{k} = ?" for k in allowed)
+        conn.execute(f"UPDATE searches SET {sets} WHERE id = ?", list(allowed.values()) + [search_id])
+        conn.commit()
+
+
+def delete_search(conn: sqlite3.Connection, search_id: int) -> None:
+    conn.execute("DELETE FROM searches WHERE id = ?", (search_id,))
+    conn.commit()
+
+
+def start_run(conn: sqlite3.Connection, trigger: str) -> int:
+    cur = conn.execute("INSERT INTO runs (started_at, trigger) VALUES (?, ?)", (_now(), trigger))
+    conn.commit()
+    return cur.lastrowid
+
+
+def finish_run(conn: sqlite3.Connection, run_id: int, searches: int, counts: dict, errors: list[str]) -> None:
+    conn.execute(
+        "UPDATE runs SET finished_at = ?, searches = ?, added = ?, updated = ?, below_min = ?, errors = ? WHERE id = ?",
+        (_now(), searches, counts.get("added", 0), counts.get("updated", 0), counts.get("below_min", 0),
+         "\n".join(errors) or None, run_id))
+    conn.commit()
+
+
+def recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def last_scheduled_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM runs WHERE trigger = 'schedule' AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+    ).fetchone()
 
 
 def _where(filters: dict) -> tuple[str, list]:
