@@ -265,13 +265,14 @@ def test_run_saved_searches(tmp_path):
     c.close()
     seen = []
 
-    def fake_scrape(url, pages, min_price, known_ids):
+    def fake_scrape(url, pages, min_price, known_ids, stats=None):
         seen.append((url, pages, min_price))
         if url.endswith("=b"):
             raise scraper.BlockedError("bot check")
         return parse_html(load("search_s_item.html")) + [{"item_id": "9", "title": "Cheap", "price": 5.0}]
 
-    r = daily.run_saved_searches(path, "schedule", scrape=fake_scrape, delay_between=0)
+    r = daily.run_saved_searches(path, "schedule", scrape=fake_scrape, delay_between=0,
+                                 brand_checks=0)
     assert seen[0] == ("https://www.ebay.com/sch/i.html?_nkw=a", 2, 30.0)
     assert (r["searches"], r["added"], r["below_min"], len(r["errors"])) == (2, 2, 1, 1)
     c = db.connect(path)

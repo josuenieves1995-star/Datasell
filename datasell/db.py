@@ -7,7 +7,7 @@ import io
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 
 DEFAULT_DB = os.environ.get("DATASELL_DB", "datasell.db")
@@ -63,6 +63,36 @@ CREATE TABLE IF NOT EXISTS searches (
     last_error  TEXT
 );
 
+-- Photo checks: what Claude saw, the market data and the verdict.
+CREATE TABLE IF NOT EXISTS appraisals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    front_thumb TEXT,
+    tag_thumb   TEXT,
+    ident       TEXT,
+    query       TEXT,
+    cost        REAL,
+    verdict     TEXT,
+    reasons     TEXT,
+    est_price   REAL,
+    list_price  REAL,
+    max_buy     REAL,
+    profit      REAL,
+    str         REAL,
+    market      TEXT
+);
+
+-- Sell-through checks for brand + item-type combos (the Fast sellers page).
+CREATE TABLE IF NOT EXISTS market_checks (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    query            TEXT NOT NULL UNIQUE,
+    sold_min_count   INTEGER,
+    active_min_count INTEGER,
+    str              REAL,
+    median_price     REAL,
+    checked_at       TEXT NOT NULL
+);
+
 -- One row per daily (or manual "run now") pull.
 CREATE TABLE IF NOT EXISTS runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,10 +117,23 @@ SORTS = {
 }
 
 
+# Columns added after the first release; added to older databases on connect.
+MIGRATIONS = {
+    "searches": {"sold_count": "INTEGER", "active_count": "INTEGER", "str": "REAL",
+                 "median_price": "REAL", "str_checked_at": "TEXT"},
+}
+
+
 def connect(path: str | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or DEFAULT_DB)
+    conn = sqlite3.connect(path or DEFAULT_DB, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    for table, cols in MIGRATIONS.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, typ in cols.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+    conn.commit()
     return conn
 
 
@@ -176,7 +219,8 @@ def list_searches(conn: sqlite3.Connection, active_only: bool = False) -> list[s
 
 def update_search(conn: sqlite3.Connection, search_id: int, **fields) -> None:
     allowed = {k: v for k, v in fields.items()
-               if k in ("name", "pages", "active", "last_run_at", "last_added", "last_error")}
+               if k in ("name", "pages", "active", "last_run_at", "last_added", "last_error",
+                        "sold_count", "active_count", "str", "median_price", "str_checked_at")}
     if allowed:
         sets = ", ".join(f"{k} = ?" for k in allowed)
         conn.execute(f"UPDATE searches SET {sets} WHERE id = ?", list(allowed.values()) + [search_id])
@@ -334,3 +378,86 @@ def to_csv(rows: list[sqlite3.Row]) -> str:
     for r in rows:
         w.writerow(dict(r))
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------- photo checks
+
+def add_appraisal(conn: sqlite3.Connection, **fields) -> int:
+    cols = ["front_thumb", "tag_thumb", "ident", "query", "cost", "verdict", "reasons",
+            "est_price", "list_price", "max_buy", "profit", "str", "market"]
+    row = {c: fields.get(c) for c in cols}
+    for c in ("ident", "reasons", "market"):
+        if row[c] is not None and not isinstance(row[c], str):
+            row[c] = json.dumps(row[c])
+    cur = conn.execute(
+        f"INSERT INTO appraisals (created_at, {', '.join(cols)}) VALUES (?, {', '.join('?' for _ in cols)})",
+        [_now()] + [row[c] for c in cols])
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_appraisal(conn: sqlite3.Connection, appraisal_id: int, **fields) -> None:
+    for c in ("ident", "reasons", "market"):
+        if c in fields and fields[c] is not None and not isinstance(fields[c], str):
+            fields[c] = json.dumps(fields[c])
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(f"UPDATE appraisals SET {sets} WHERE id = ?", list(fields.values()) + [appraisal_id])
+    conn.commit()
+
+
+def get_appraisal(conn: sqlite3.Connection, appraisal_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM appraisals WHERE id = ?", (appraisal_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    for c, empty in (("ident", {}), ("reasons", []), ("market", {})):
+        try:
+            d[c] = json.loads(d[c]) if d[c] else empty
+        except json.JSONDecodeError:
+            d[c] = empty
+    return d
+
+
+def list_appraisals(conn: sqlite3.Connection, limit: int = 30) -> list[dict]:
+    rows = conn.execute("SELECT id FROM appraisals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [get_appraisal(conn, r["id"]) for r in rows]
+
+
+def delete_appraisal(conn: sqlite3.Connection, appraisal_id: int) -> None:
+    conn.execute("DELETE FROM appraisals WHERE id = ?", (appraisal_id,))
+    conn.commit()
+
+
+# ---------------------------------------------------------------- sell-through checks
+
+def save_market_check(conn: sqlite3.Connection, query: str, m: dict) -> None:
+    conn.execute(
+        """INSERT INTO market_checks (query, sold_min_count, active_min_count, str, median_price, checked_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(query) DO UPDATE SET sold_min_count = excluded.sold_min_count,
+             active_min_count = excluded.active_min_count, str = excluded.str,
+             median_price = excluded.median_price, checked_at = excluded.checked_at""",
+        (query, m.get("sold_min_count"), m.get("active_min_count"), m.get("str"),
+         m.get("median_price_min") or m.get("median_price"), _now()))
+    conn.commit()
+
+
+def market_checks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM market_checks ORDER BY str DESC").fetchall()
+
+
+def stale_market_queries(conn: sqlite3.Connection, queries: list[str], max_age_days: int = 7) -> list[str]:
+    """Which of these queries have no check, or one older than max_age_days."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat(timespec="seconds")
+    fresh = {r[0] for r in conn.execute("SELECT query FROM market_checks WHERE checked_at >= ?", (cutoff,))}
+    return [q for q in queries if q not in fresh]
+
+
+def top_brand_combos(conn: sqlite3.Connection, min_count: int = 3, limit: int = 10) -> list[str]:
+    """Brand + category combos that most often sell for the minimum or more."""
+    rows = conn.execute(
+        """SELECT brand, category, COUNT(*) n FROM listings
+           WHERE brand IS NOT NULL AND category IS NOT NULL AND price >= ?
+           GROUP BY brand COLLATE NOCASE, category HAVING n >= ? ORDER BY n DESC LIMIT ?""",
+        (MIN_PRICE, min_count, limit)).fetchall()
+    return [f"{r['brand']} {r['category']}" for r in rows]

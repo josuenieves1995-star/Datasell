@@ -6,6 +6,7 @@
   searches                  list saved searches
   daily                     run the daily update now (for cron / Task Scheduler)
   prune                     delete stored sales under the minimum price
+  check "QUERY" [--cost X]  is this item worth buying? (price, sell-through, verdict)
   import FILE.html [--url]  parse a saved eBay page
   export [FILE.csv]         write the database to CSV
   stats [--by FIELD]        print median prices grouped by a field
@@ -31,6 +32,7 @@ def main(argv=None):
     a.add_argument("--watch", action="store_true", help="also save search URLs for the daily update")
     w = sub.add_parser("watch"); w.add_argument("url"); w.add_argument("--pages", type=int, default=3); w.add_argument("--name")
     sub.add_parser("searches"); sub.add_parser("daily"); sub.add_parser("prune")
+    ck = sub.add_parser("check"); ck.add_argument("query"); ck.add_argument("--cost", type=float)
     i = sub.add_parser("import"); i.add_argument("files", nargs="+"); i.add_argument("--url")
     e = sub.add_parser("export"); e.add_argument("out", nargs="?", default="-")
     st = sub.add_parser("stats"); st.add_argument("--by", default="brand", choices=db.FILTERABLE + ["vintage"])
@@ -70,6 +72,16 @@ def main(argv=None):
             state = "on " if s["active"] else "off"
             print(f"[{s['id']}] {state} pages={s['pages']} last={s['last_run_at'] or 'never'} "
                   f"added={s['last_added'] if s['last_added'] is not None else '-'}  {s['name'] or s['url']}")
+        return 0
+    if args.cmd == "check":
+        from .appraise import run_market, verdict
+        m = run_market(args.query, conn)
+        v = verdict(m, args.cost)
+        print({"BUY": "BUY IT", "MAYBE": "MAYBE", "PASS": "PASS"}[v["verdict"]])
+        for r in v["reasons"]:
+            print(" -", r)
+        if m.get("source") == "local":
+            print(f"(eBay unreachable: {m['error']} Used your saved data instead.)")
         return 0
     if args.cmd == "prune":
         print(f"Deleted {db.prune_below(conn)} listings under ${db.MIN_PRICE:g}")

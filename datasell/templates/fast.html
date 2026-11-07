@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Fast sellers{% endblock %}
+{% block content %}
+<h1>Fast sellers <span class="muted" style="font-size:14px;font-weight:400">· ${{ '%g' % min_price }}+ sales</span></h1>
+<div class="panel muted" style="font-size:14px">
+  <b>Sell-through</b> = items sold in the last ~90 days ÷ (sold + still listed), counting only ${{ '%g' % min_price }}+ listings.
+  <b>{{ '%d' % (fast_str * 100) }}%+</b> is fast, {{ '%d' % (ok_str * 100) }}–{{ '%d' % (fast_str * 100) }}% moderate, under {{ '%d' % (ok_str * 100) }}% slow.
+  Updated each night for your saved searches and the brands that sell most often at ${{ '%g' % min_price }}+.
+</div>
+{% if rows %}
+<div class="panel" style="padding:0">
+  {% for r in rows %}
+  <div class="search-row">
+    <div style="flex:1 1 220px;min-width:0">
+      <a href="{{ r.url }}" target="_blank" rel="noopener" class="search-name">{{ r.name }}</a>
+      <div class="muted" style="font-size:13px">{{ r.kind }} · {{ r.sold }} sold / {{ r.active }} listed{% if r.median %} · median {{ r.median|money }}{% endif %} · {{ r.checked[:10] if r.checked else '' }}</div>
+    </div>
+    <span class="verdict-chip {{ {'Fast': 'buy', 'Moderate': 'maybe', 'Slow': 'pass'}[speed(r.str)] }}">{{ '%d' % (r.str * 100) }}% · {{ speed(r.str) }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel muted">Nothing here yet. Sell-through is measured during the nightly update for each
+  <a href="{{ url_for('searches') }}">saved search</a> and for your top brands. Run an update to fill this in.</div>
+{% endif %}
+<p class="muted" style="font-size:13px">
+  {% if hidden %}{{ hidden }} slow seller{{ 's' if hidden != 1 }} hidden. <a href="?all=1">Show all</a>{% elif show_all %}<a href="?">Hide slow sellers</a>{% endif %}
+</p>
+{% endblock %}

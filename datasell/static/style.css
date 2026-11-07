@@ -70,3 +70,30 @@ details summary { cursor: pointer; font-weight: 600; }
 .search-row:last-child { border-bottom: 0; }
 .search-name { font-weight: 600; overflow-wrap: anywhere; }
 .flash { overflow-wrap: anywhere; }
+:root { --buy: #1f7a4a; --buy-bg: #e3f3ea; --maybe: #8a5a00; --maybe-bg: #fbf0d6; --pass: #a33a2c; --pass-bg: #f8e2df; }
+@media (prefers-color-scheme: dark) {
+  :root { --buy: #7fd3a4; --buy-bg: #183326; --maybe: #f0c46a; --maybe-bg: #3a2f17; --pass: #f29a8e; --pass-bg: #3d2320; }
+}
+.photo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.photo-pick { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1;
+  border: 2px dashed var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; overflow: hidden;
+  color: var(--text); font-size: 15px; margin: 0; }
+.photo-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.photo-pick img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+.photo-pick.has-img img { display: block; }
+.photo-pick.has-img span { position: relative; background: rgba(0,0,0,.55); color: #fff; padding: 2px 8px; border-radius: 5px; }
+.thumb { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; }
+.verdict-box { border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+.verdict-box.buy { background: var(--buy-bg); color: var(--buy); }
+.verdict-box.maybe { background: var(--maybe-bg); color: var(--maybe); }
+.verdict-box.pass { background: var(--pass-bg); color: var(--pass); }
+.verdict-word { font-size: 30px; font-weight: 800; }
+.verdict-sub { color: var(--text); margin-top: 4px; }
+.verdict-chip { border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.verdict-chip.buy { background: var(--buy-bg); color: var(--buy); }
+.verdict-chip.maybe { background: var(--maybe-bg); color: var(--maybe); }
+.verdict-chip.pass { background: var(--pass-bg); color: var(--pass); }
+.reasons { margin: 0; padding-left: 18px; }
+.reasons li { margin: 4px 0; }
+.copy-row { display: flex; gap: 8px; }
+code { font-size: 13px; background: var(--tag); padding: 1px 5px; border-radius: 4px; }

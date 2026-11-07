@@ -14,13 +14,17 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import db
-from .scraper import ScrapeError, scrape_url
+from statistics import median
+
+from . import db, market
+from .scraper import BlockedError, ScrapeError, fetch, parse_result_count, scrape_url
 
 log = logging.getLogger("datasell.daily")
 
 DAILY_AT = os.environ.get("DATASELL_DAILY_AT", "23:30")
 TZ = os.environ.get("DATASELL_TZ") or None
+# How many brand + item-type sell-through checks to refresh per daily run.
+BRAND_CHECKS = int(os.environ.get("DATASELL_BRAND_CHECKS", "10"))
 
 # Only one pull at a time, whether scheduled or started with "Run now".
 _run_lock = threading.Lock()
@@ -30,9 +34,15 @@ def is_running() -> bool:
     return _run_lock.locked()
 
 
+def count_active(sold_url: str, min_price: float) -> int | None:
+    """Live listings for the same search, for the sell-through rate."""
+    return parse_result_count(fetch(market.active_version(sold_url, min_price)))
+
+
 def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
                        min_price: float | None = None, scrape=scrape_url,
-                       delay_between: float = 3.0) -> dict | None:
+                       delay_between: float = 3.0, active_counter=count_active,
+                       brand_check=market.check, brand_checks: int = BRAND_CHECKS) -> dict | None:
     """Scrape all active saved searches. Returns a summary, or None if a run
     is already in progress."""
     if not _run_lock.acquire(blocking=False):
@@ -50,8 +60,11 @@ def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
                 if i:
                     time.sleep(delay_between)
                 try:
-                    listings = scrape(s["url"], pages=s["pages"], min_price=floor, known_ids=known)
+                    stats: dict = {}
+                    listings = scrape(s["url"], pages=s["pages"], min_price=floor, known_ids=known,
+                                      stats=stats)
                     counts = db.save_many(conn, listings, floor)
+                    _record_sell_through(conn, s["id"], stats, listings, floor, active_counter)
                     known.update(l["item_id"] for l in listings if l.get("item_id"))
                     for k in totals:
                         totals[k] += counts[k]
@@ -60,6 +73,8 @@ def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
                 except ScrapeError as e:
                     errors.append(f"{s['name'] or s['url']}: {e}")
                     db.update_search(conn, s["id"], last_run_at=db._now(), last_error=str(e))
+            if brand_checks:
+                errors += _refresh_brand_checks(conn, brand_check, brand_checks, delay_between)
             db.finish_run(conn, run_id, len(searches), totals, errors)
             log.info("Daily pull (%s): %d searches, %d added, %d updated, %d errors",
                      trigger, len(searches), totals["added"], totals["updated"], len(errors))
@@ -68,6 +83,39 @@ def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
             conn.close()
     finally:
         _run_lock.release()
+
+
+def _record_sell_through(conn, search_id: int, stats: dict, listings: list[dict],
+                         floor: float, active_counter) -> None:
+    sold = stats.get("total_results")
+    prices = [l["price"] for l in listings if l.get("price") and l["price"] >= floor]
+    try:
+        active = active_counter(stats["url"], floor) if stats.get("url") else None
+    except ScrapeError:
+        active = None
+    db.update_search(conn, search_id, sold_count=sold, active_count=active,
+                     str=market.sell_through(sold, active),
+                     median_price=round(median(prices), 2) if prices else None,
+                     str_checked_at=db._now())
+
+
+def _refresh_brand_checks(conn, check, limit: int, delay: float) -> list[str]:
+    """Sell-through for the brands that sell most often at $30+ (weekly)."""
+    errors = []
+    queries = db.stale_market_queries(conn, db.top_brand_combos(conn, limit=limit * 3))[:limit]
+    for i, q in enumerate(queries):
+        if i:
+            time.sleep(delay)
+        try:
+            m = check(q, all_prices=False)
+            db.save_market_check(conn, q, m)
+            db.save_many(conn, m.get("comps_min") or [])
+        except BlockedError as e:
+            errors.append(f"Brand check '{q}': {e}")
+            break  # eBay is blocking us; don't keep trying tonight
+        except ScrapeError as e:
+            errors.append(f"Brand check '{q}': {e}")
+    return errors
 
 
 def _now(tz: str | None) -> datetime:

@@ -153,6 +153,23 @@ def with_page(url: str, page: int) -> str:
 
 # ---------------------------------------------------------------- search pages
 
+def parse_result_count(html: str) -> int | None:
+    """Total results eBay reports for a search, e.g. '1,234 results for ...'.
+
+    For a sold search this is the number of matching sales (eBay keeps about
+    90 days); for an active search, the number of live listings.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    el = soup.select_one(".srp-controls__count-heading, .srp-controls__count, h1.srp-controls__count-heading")
+    text = _text(el) if el else ""
+    m = re.search(r"([\d,]+)\+?\s+results?", text) or re.search(r"([\d,]+)\+?\s+results?\s+for", html)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    if re.search(r"\b(?:0|No exact matches) (?:results|found)", text + html[:200000], re.I):
+        return 0
+    return None
+
+
 def _card_parts(card: Tag) -> dict:
     """Extract raw fields from either the s-item or s-card layout."""
     title_el = card.select_one(".s-item__title, .s-card__title")
@@ -377,11 +394,13 @@ def fetch(url: str, session: requests.Session | None = None, timeout: int = 20) 
 
 def scrape_url(url: str, pages: int = 1, delay: float = 1.5,
                session: requests.Session | None = None, min_price: float | None = None,
-               known_ids: set[str] | None = None) -> list[dict]:
+               known_ids: set[str] | None = None, stats: dict | None = None) -> list[dict]:
     """Scrape a sold search URL (optionally several pages) or an item URL.
 
     With `known_ids`, paging stops early once a page has nothing new, which
     keeps the daily update fast (results are sorted newest first).
+    If `stats` is given, it receives 'total_results' (eBay's sold count for
+    the search) and 'url' (the final sold-search URL).
     """
     url = url.strip()
     if not re.match(r"https?://", url):
@@ -395,7 +414,11 @@ def scrape_url(url: str, pages: int = 1, delay: float = 1.5,
         results: list[dict] = []
         for page in range(1, max(1, pages) + 1):
             page_url = url if page == 1 else with_page(url, page)
-            page_results = parse_search_page(fetch(page_url, session), page_url)
+            html = fetch(page_url, session)
+            if page == 1 and stats is not None:
+                stats["total_results"] = parse_result_count(html)
+                stats["url"] = url
+            page_results = parse_search_page(html, page_url)
             if not page_results:
                 break
             results.extend(page_results)

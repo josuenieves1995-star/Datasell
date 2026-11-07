@@ -4,15 +4,63 @@ Build a searchable database of **used clothing sold on eBay**. Paste eBay *sold*
 scrapes each listing, pulls out clothing attributes (brand, category, size, color, material,
 department, condition, vintage/era), stores them in SQLite, and shows what things actually sell for.
 
+- **Check an item from your phone.** Snap the front and the tag; Claude reads the brand, size,
+  material and era, then the app checks eBay solds and says **Buy it / Maybe / Pass** with the
+  typical sale price, sell-through rate, what to list at and how much you can pay.
 - **$30+ sales only.** Anything that sold for under $30 (or has no price) is ignored.
+- **Sell-through rate.** For your saved searches and your best brands: how much of the $30+
+  market actually sells within ~90 days. The **Fast sellers** page ranks them.
 - **Updated daily.** Saved searches are re-pulled automatically every evening at 11:30 PM.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-python -m datasell serve          # open http://127.0.0.1:5000
+export ANTHROPIC_API_KEY=sk-ant-...   # for photo checks (Windows: set ANTHROPIC_API_KEY=...)
+python -m datasell serve --host 0.0.0.0   # open http://<this computer's IP>:5000 on your phone
 ```
+
+`--host 0.0.0.0` lets your phone open the app when it's on the same Wi-Fi. Leave it out to use
+the app only on the computer itself.
+
+## Check an item (Buy / Maybe / Pass)
+
+Open **Check item** on your phone, tap **Front of item** and **Tag** to take the two photos,
+optionally enter what it costs, and tap **Check it** (about 20–40 seconds). You get:
+
+- **Verdict** with plain reasons, e.g. "Fast: 62% sell-through at $30+ (118 sold in ~90 days vs
+  72 listed)" or "Usually sells for $18, under your $30 minimum".
+- **Typical sale** (median of recent eBay solds for that item, pre-owned), **list at** (upper
+  quarter of solds), and **max to pay** (or estimated profit if you entered the cost).
+- **What Claude sees**: brand, line, size, material, made in, RN number, era, condition notes,
+  red flags (e.g. signs of a fake), and a suggested listing title you can copy into Nifty.
+- **Sold comps** with links to eBay. If the search doesn't match the item, edit it and tap
+  **Check again** (no new photo needed). The $30+ comps are saved to your database too.
+
+No photo or no API key? Open **No photo? Type what it is**, or from the command line:
+`python -m datasell check "Patagonia Retro X fleece" --cost 8`.
+
+How the verdict is decided (all adjustable, see Settings):
+
+| | Rule |
+| --- | --- |
+| **Buy it** | Typical sale is $30+, sell-through at $30+ is 50% or more, 5+ comps, confident ID, and (if you entered a cost) $15+ profit after ~15% fees |
+| **Maybe** | Sell-through 25–50%, few comps, unsure ID, eBay couldn't be checked, or profit just under target |
+| **Pass** | Typical sale under $30, sell-through under 25%, or profit well under target |
+
+Each photo check costs a few cents of Claude API usage (model `claude-opus-5-5`; change it with
+`DATASELL_MODEL`). Get an API key at console.anthropic.com.
+
+## Sell-through rate and Fast sellers
+
+Sell-through = items sold in the last ~90 days ÷ (sold + still listed), counting only $30+
+listings, read from the result counts on eBay's sold and active searches. Each night the app
+measures it for every saved search, plus up to 10 of the brand + item-type combos (e.g.
+"Carhartt Jacket") that sell most often at $30+ in your data (each re-checked weekly). The
+**Fast sellers** page ranks them and hides slow ones.
+
+The **Daily updates** page has one-tap presets for eBay clothing categories (men's and women's
+coats, sweaters, shirts, jeans, pants, dresses, shoes…), optionally narrowed to a brand.
 
 1. On eBay, search for something (e.g. `vintage levis 501`), turn on **Sold items** in the filters,
    and copy the address bar URL.
@@ -72,6 +120,12 @@ Settings (environment variables):
 | `DATASELL_DAILY_AT` | `23:30` | Time of the daily update (24-hour) |
 | `DATASELL_TZ` | computer's time zone | Time zone for the daily update, e.g. `America/New_York` |
 | `DATASELL_DB` | `datasell.db` | Database file |
+| `ANTHROPIC_API_KEY` | — | Claude API key for photo checks |
+| `DATASELL_MODEL` | `claude-opus-5-5` | Claude model for photo checks |
+| `DATASELL_FAST_STR` / `DATASELL_OK_STR` | `0.5` / `0.25` | Sell-through for "fast" / "moderate" |
+| `DATASELL_FEE_RATE` | `0.15` | Marketplace fees used for profit |
+| `DATASELL_MIN_PROFIT` | `15` | Profit an item must clear to be a Buy |
+| `DATASELL_BRAND_CHECKS` | `10` | Brand sell-through checks per night |
 
 ### If eBay blocks the request
 
@@ -126,7 +180,10 @@ python -m pytest
   layouts) and item pages
 - `datasell/attributes.py` – clothing attribute extraction from titles and item specifics
 - `datasell/db.py` – SQLite schema, upserts, $30 minimum, saved searches, filtering, stats, CSV
-- `datasell/daily.py` – daily update job and background scheduler
+- `datasell/daily.py` – daily update job, sell-through tracking and background scheduler
+- `datasell/vision.py` – identifying an item from photos with Claude
+- `datasell/market.py` – eBay comps and sell-through checks
+- `datasell/appraise.py` – Buy / Maybe / Pass rules
 - `datasell/app.py` – Flask web UI and JSON API
 - `tests/` – tests with saved HTML fixtures
 

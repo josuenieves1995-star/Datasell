@@ -16,6 +16,13 @@
 </div>
 
 <h2>Saved searches</h2>
+<form class="panel form-grid" method="post" action="{{ url_for('add_preset') }}">
+  <div class="full muted" style="font-size:13px">Quick add: one of the categories you sell, optionally narrowed to a brand.</div>
+  <div><label>Category</label>
+    <select name="category">{% for label, cid in presets %}<option value="{{ cid }}">{{ label }}</option>{% endfor %}</select></div>
+  <div><label>Brand or keyword (optional)</label><input name="keyword" placeholder="e.g. Patagonia"></div>
+  <div><label>&nbsp;</label><button>Add category</button></div>
+</form>
 <form class="panel form-grid" method="post">
   <div class="full"><label>eBay search URL</label><input name="url" placeholder="https://www.ebay.com/sch/i.html?_nkw=vintage+carhartt+jacket&LH_Sold=1"></div>
   <div><label>Name (optional)</label><input name="name" placeholder="Carhartt jackets"></div>
@@ -31,7 +38,7 @@
       <a href="{{ s.url }}" target="_blank" rel="noopener" class="search-name">{{ s.name or s.url|replace('https://www.ebay.com/sch/i.html?', '') }}</a>
       <div class="muted" style="font-size:13px">
         {{ s.pages }} page{{ 's' if s.pages != 1 }} · last pulled {{ s.last_run_at[:16].replace('T', ' ') ~ ' UTC' if s.last_run_at else 'never' }}
-        {% if s.last_added is not none %} · {{ s.last_added }} new{% endif %}{% if not s.active %} · paused{% endif %}
+        {% if s.last_added is not none %} · {{ s.last_added }} new{% endif %}{% if s.str is not none %} · {{ '%d' % (s.str * 100) }}% sell-through{% endif %}{% if not s.active %} · paused{% endif %}
       </div>
       {% if s.last_error %}<div class="flash error" style="margin:6px 0 0;padding:4px 8px;font-size:12px">{{ s.last_error }}</div>{% endif %}
     </div>
