@@ -10,6 +10,11 @@
     The automatic daily update isn't running in this process. Start the app with
     <code>python -m datasell serve</code>, or schedule <code>python -m datasell daily</code> with cron.
   {% endif %}
+  {% if backup %}
+  <p class="muted" style="font-size:13px;margin:10px 0 0">
+    Backup: {{ 'last saved ' ~ backup.at if backup.at else 'not saved yet' }} to <code>{{ backup.folder }}</code>
+    (database + CSV of solds, refreshed after each update).</p>
+  {% endif %}
   <form method="post" action="{{ url_for('run_now') }}" style="margin-top:12px">
     <button {{ 'disabled' if running }}>{{ 'Update running…' if running else 'Run update now' }}</button>
   </form>

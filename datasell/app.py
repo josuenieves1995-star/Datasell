@@ -129,7 +129,7 @@ def create_app(db_path: str | None = None) -> Flask:
         return render_template("searches.html", searches=db.list_searches(conn()), presets=market.PRESET_CATEGORIES,
                                runs=db.recent_runs(conn()), next_run=nxt,
                                scheduler_on=app.config["SCHEDULER_ON"], running=daily.is_running(),
-                               daily_at=app.config["DAILY_AT"])
+                               daily_at=app.config["DAILY_AT"], backup=db.last_backup())
 
     @app.post("/searches/<int:search_id>/toggle")
     def toggle_search(search_id: int):
@@ -170,7 +170,11 @@ def create_app(db_path: str | None = None) -> Flask:
 
     # ------------------------------------------------------------ photo check
 
-    def _thumb(jpeg: bytes) -> str:
+    def _thumb(jpeg: bytes) -> str | None:
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            return None  # no thumbnails without Pillow; full photos would bloat the database
         small = vision.prepare_image(jpeg, max_edge=420, quality=70)
         return "data:image/jpeg;base64," + base64.b64encode(small).decode()
 

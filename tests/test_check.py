@@ -286,3 +286,49 @@ def test_fast_sellers_and_presets(client):
     html = client.get("/fast").data.decode()
     assert "Carhartt Jacket" in html and "70% · Fast" in html and "Gap Jeans" not in html and "1 slow seller hidden" in html
     assert "Gap Jeans" in client.get("/fast?all=1").data.decode()
+
+
+# ---------------------------------------------------------------- phone storage backups
+
+def test_backup_and_restore(tmp_path):
+    live = str(tmp_path / "home" / "datasell.db")
+    docs = str(tmp_path / "Documents" / "Datasell")
+    import os
+    os.makedirs(os.path.dirname(live))
+    c = db.connect(live)
+    db.save_many(c, [{"item_id": "1", "title": "Carhartt Jacket", "price": 80, "brand": "Carhartt"}])
+    assert db.backup(c, docs).endswith("datasell.db")
+    assert "Carhartt" in open(os.path.join(docs, "datasell_solds.csv")).read()
+    assert db.last_backup(docs)["at"]
+    c.close()
+    os.remove(live)  # e.g. Termux was reinstalled
+    assert db.restore_if_missing(live, docs)
+    assert db.query(db.connect(live))[1] == 1
+    assert not db.restore_if_missing(live, docs)  # never overwrites a live database
+
+
+def test_daily_run_writes_backup(tmp_path, monkeypatch):
+    docs = str(tmp_path / "Docs")
+    monkeypatch.setattr(db, "BACKUP_DIR", docs)
+    path = str(tmp_path / "d.db")
+    db.connect(path).close()
+    daily.run_saved_searches(path, delay_between=0, brand_checks=0)
+    import os
+    assert os.path.exists(os.path.join(docs, "datasell.db"))
+
+
+def test_photo_prep_without_pillow(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def no_pil(name, *a, **kw):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("no pillow")
+        return real_import(name, *a, **kw)
+    small = jpeg(size=(800, 600))
+    monkeypatch.setattr(builtins, "__import__", no_pil)
+    assert vision.prepare_image(small) == small
+    with pytest.raises(vision.IdentifyError):
+        vision.prepare_image(b"\x89PNG....")
+    with pytest.raises(vision.IdentifyError):
+        vision.prepare_image(b"\xff\xd8\xff" + b"0" * 4_000_000)

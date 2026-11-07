@@ -75,9 +75,29 @@ def api_configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
 
+# The API accepts images up to 5 MB once base64-encoded (about 3.75 MB raw).
+MAX_RAW_BYTES = 3_700_000
+
+
+def _is_jpeg(data: bytes) -> bool:
+    return data[:3] == b"\xff\xd8\xff"
+
+
 def prepare_image(data: bytes, max_edge: int = MAX_EDGE, quality: int = 85) -> bytes:
-    """Rotate per EXIF, downscale and re-encode a phone photo as JPEG."""
-    from PIL import Image, ImageOps
+    """Rotate per EXIF, downscale and re-encode a phone photo as JPEG.
+
+    Without Pillow (it can be hard to install on a phone), a JPEG under the
+    API's size limit is passed through unchanged.
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        if not _is_jpeg(data):
+            raise IdentifyError("Couldn't read that photo. Please use a JPEG.")
+        if len(data) > MAX_RAW_BYTES:
+            raise IdentifyError("That photo is too large. Install Pillow (see README) or "
+                                "lower the camera resolution.")
+        return data
 
     try:
         try:  # iPhone HEIC photos, if pillow-heif is installed

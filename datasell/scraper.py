@@ -13,6 +13,7 @@ save the page from your browser and pass the HTML to `parse_html` instead.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -22,6 +23,13 @@ import requests
 from bs4 import BeautifulSoup, Tag
 
 from .attributes import extract_attributes
+
+# lxml is faster, but Python's built-in parser works everywhere (e.g. Android/Termux).
+try:
+    import lxml  # noqa: F401
+    PARSER = os.environ.get("DATASELL_PARSER") or "lxml"
+except ImportError:
+    PARSER = "html.parser"
 
 HEADERS = {
     "User-Agent": (
@@ -159,7 +167,7 @@ def parse_result_count(html: str) -> int | None:
     For a sold search this is the number of matching sales (eBay keeps about
     90 days); for an active search, the number of live listings.
     """
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, PARSER)
     el = soup.select_one(".srp-controls__count-heading, .srp-controls__count, h1.srp-controls__count-heading")
     text = _text(el) if el else ""
     m = re.search(r"([\d,]+)\+?\s+results?", text) or re.search(r"([\d,]+)\+?\s+results?\s+for", html)
@@ -221,7 +229,7 @@ def _card_parts(card: Tag) -> dict:
 
 
 def parse_search_page(html: str, source_url: str | None = None) -> list[dict]:
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, PARSER)
     cards = soup.select("li.s-item, li.s-card, div.s-item")
     results = []
     seen = set()
@@ -288,7 +296,7 @@ def _json_ld_product(soup: BeautifulSoup) -> dict:
 
 
 def parse_item_page(html: str, url: str | None = None) -> dict:
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, PARSER)
     ld = _json_ld_product(soup)
 
     title = _text(soup.select_one("h1.x-item-title__mainTitle, h1#itemTitle, h1"))

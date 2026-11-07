@@ -23,6 +23,53 @@ python -m datasell serve --host 0.0.0.0   # open http://<this computer's IP>:500
 `--host 0.0.0.0` lets your phone open the app when it's on the same Wi-Fi. Leave it out to use
 the app only on the computer itself.
 
+## Run it on an Android phone (data stays on the phone)
+
+Everything runs on the phone using the free **Termux** app: the app, your database, photo checks
+and the nightly eBay pull (over your Wi-Fi). Nothing depends on a computer.
+
+**Where your data lives**
+
+| What | Where |
+| --- | --- |
+| Live database | Termux's own storage on the phone (`~/datasell-data/datasell.db`) |
+| Nightly backup + spreadsheet of solds | **Documents/Datasell** on the phone (`datasell.db`, `datasell_solds.csv`), visible in the Files app and kept even if Termux is removed |
+
+If the live database is ever missing (new phone, Termux reinstalled), the app restores it from the
+Documents backup automatically the next time it starts. To move to a new phone, copy the
+**Documents/Datasell** folder over before running setup.
+
+**One-time setup (about 10 minutes)**
+
+1. Install **Termux** from F-Droid (f-droid.org) or its GitHub releases page. The Play Store
+   version is outdated. Optional but recommended from the same place: **Termux:Widget** (home
+   screen button) and **Termux:Boot** (starts Datasell when the phone restarts).
+2. Open Termux and run:
+
+   ```bash
+   pkg install -y git
+   git clone -b claude/ebay-clothing-db https://github.com/josuenieves1995-star/datasell ~/datasell
+   bash ~/datasell/termux/setup.sh
+   ```
+
+   If the repository is private, GitHub asks for your username and a personal access token
+   (github.com → Settings → Developer settings → Personal access tokens) instead of a password.
+   Setup installs Python, asks to allow file access (tap **Allow**) and asks for your Claude API
+   key (optional).
+3. In Android **Settings → Apps → Termux → Battery**, choose **Unrestricted**. Otherwise Android
+   pauses Termux and the nightly update won't run.
+
+**Daily use**
+
+- **Start:** tap the **Datasell** widget on your home screen (add it via Termux:Widget), or run
+  `bash ~/datasell/termux/start.sh` in Termux. It opens the app in your browser.
+- **App icon:** in Chrome, menu **⋮ → Add to Home screen**. (The app has to be running, so use the
+  widget after a restart.)
+- **Stop:** `bash ~/datasell/termux/stop.sh`. **Update to the latest version:**
+  `bash ~/datasell/termux/update.sh` (your data isn't touched).
+- The nightly update runs at 11:30 PM while Datasell is running (Termux shows a notification).
+  If the phone was off, it catches up when you next start it.
+
 ## Check an item (Buy / Maybe / Pass)
 
 Open **Check item** on your phone, tap **Front of item** and **Tag** to take the two photos,
@@ -120,6 +167,7 @@ Settings (environment variables):
 | `DATASELL_DAILY_AT` | `23:30` | Time of the daily update (24-hour) |
 | `DATASELL_TZ` | computer's time zone | Time zone for the daily update, e.g. `America/New_York` |
 | `DATASELL_DB` | `datasell.db` | Database file |
+| `DATASELL_BACKUP_DIR` | — | Folder for nightly backups + CSV (set by the Android setup) |
 | `ANTHROPIC_API_KEY` | — | Claude API key for photo checks |
 | `DATASELL_MODEL` | `claude-opus-5-5` | Claude model for photo checks |
 | `DATASELL_FAST_STR` / `DATASELL_OK_STR` | `0.5` / `0.25` | Sell-through for "fast" / "moderate" |
@@ -142,6 +190,7 @@ python -m datasell watch "https://www.ebay.com/sch/i.html?_nkw=vintage+carhartt"
 python -m datasell searches              # list saved searches and when they last ran
 python -m datasell daily                 # run the daily update now
 python -m datasell prune                 # delete stored sales under the minimum
+python -m datasell backup ~/Documents    # copy the database + CSV of solds somewhere
 python -m datasell import saved_page.html --url https://www.ebay.com/itm/123456789012
 python -m datasell stats --by brand      # or category, size, color, material, era, vintage...
 python -m datasell export listings.csv
@@ -185,6 +234,7 @@ python -m pytest
 - `datasell/market.py` – eBay comps and sell-through checks
 - `datasell/appraise.py` – Buy / Maybe / Pass rules
 - `datasell/app.py` – Flask web UI and JSON API
+- `termux/` – Android (Termux) setup, start, stop and update scripts
 - `tests/` – tests with saved HTML fixtures
 
 Please scrape responsibly: keep page counts modest (there is a delay between pages) and respect

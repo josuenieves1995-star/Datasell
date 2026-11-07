@@ -1,0 +1,13 @@
+{
+  "name": "Datasell",
+  "short_name": "Datasell",
+  "description": "Is it worth it? eBay sold comps and sell-through for used clothing.",
+  "start_url": "/check",
+  "display": "standalone",
+  "background_color": "#f6f5f2",
+  "theme_color": "#2f5d50",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

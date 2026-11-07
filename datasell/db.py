@@ -6,11 +6,18 @@ import csv
 import io
 import json
 import os
+import shutil
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from statistics import median
 
 DEFAULT_DB = os.environ.get("DATASELL_DB", "datasell.db")
+# Optional folder for nightly copies of the database + a CSV of solds, e.g.
+# /storage/emulated/0/Documents/Datasell on Android (visible in the Files app).
+BACKUP_DIR = os.environ.get("DATASELL_BACKUP_DIR") or None
+BACKUP_NAME = "datasell.db"
+CSV_NAME = "datasell_solds.csv"
+
 # Only keep sales at or above this price (sold price, not counting shipping).
 MIN_PRICE = float(os.environ.get("DATASELL_MIN_PRICE", "30"))
 
@@ -461,3 +468,60 @@ def top_brand_combos(conn: sqlite3.Connection, min_count: int = 3, limit: int = 
            GROUP BY brand COLLATE NOCASE, category HAVING n >= ? ORDER BY n DESC LIMIT ?""",
         (MIN_PRICE, min_count, limit)).fetchall()
     return [f"{r['brand']} {r['category']}" for r in rows]
+
+
+# ---------------------------------------------------------------- backups
+
+def backup(conn: sqlite3.Connection, folder: str | None = None) -> str | None:
+    """Copy the database (safely, while in use) and a CSV of solds to `folder`.
+
+    Writes to temporary files first so a backup is never left half-written.
+    Returns the backup path, or None if no folder is configured.
+    """
+    folder = folder or BACKUP_DIR
+    if not folder:
+        return None
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, BACKUP_NAME)
+    tmp = target + ".tmp"
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    dest = sqlite3.connect(tmp)
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()
+    os.replace(tmp, target)
+
+    rows, _ = query(conn, {}, limit=None)
+    csv_tmp = os.path.join(folder, CSV_NAME + ".tmp")
+    with open(csv_tmp, "w", newline="", encoding="utf-8") as f:
+        f.write(to_csv(rows))
+    os.replace(csv_tmp, os.path.join(folder, CSV_NAME))
+    return target
+
+
+def last_backup(folder: str | None = None) -> dict | None:
+    folder = folder or BACKUP_DIR
+    if not folder:
+        return None
+    path = os.path.join(folder, BACKUP_NAME)
+    if not os.path.exists(path):
+        return {"folder": folder, "at": None}
+    at = datetime.fromtimestamp(os.path.getmtime(path)).astimezone()
+    return {"folder": folder, "at": at.strftime("%b %d, %I:%M %p")}
+
+
+def restore_if_missing(path: str | None = None, folder: str | None = None) -> bool:
+    """If the database file is gone (e.g. the app was reinstalled) but a backup
+    exists, copy the backup back. Returns True if it restored."""
+    path = path or DEFAULT_DB
+    folder = folder or BACKUP_DIR
+    if not folder or os.path.exists(path):
+        return False
+    src = os.path.join(folder, BACKUP_NAME)
+    if not os.path.exists(src):
+        return False
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    shutil.copyfile(src, path)
+    return True

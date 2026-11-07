@@ -6,6 +6,7 @@
   searches                  list saved searches
   daily                     run the daily update now (for cron / Task Scheduler)
   prune                     delete stored sales under the minimum price
+  backup [FOLDER]           copy the database + a CSV of solds (default DATASELL_BACKUP_DIR)
   check "QUERY" [--cost X]  is this item worth buying? (price, sell-through, verdict)
   import FILE.html [--url]  parse a saved eBay page
   export [FILE.csv]         write the database to CSV
@@ -32,6 +33,7 @@ def main(argv=None):
     a.add_argument("--watch", action="store_true", help="also save search URLs for the daily update")
     w = sub.add_parser("watch"); w.add_argument("url"); w.add_argument("--pages", type=int, default=3); w.add_argument("--name")
     sub.add_parser("searches"); sub.add_parser("daily"); sub.add_parser("prune")
+    bk = sub.add_parser("backup"); bk.add_argument("folder", nargs="?")
     ck = sub.add_parser("check"); ck.add_argument("query"); ck.add_argument("--cost", type=float)
     i = sub.add_parser("import"); i.add_argument("files", nargs="+"); i.add_argument("--url")
     e = sub.add_parser("export"); e.add_argument("out", nargs="?", default="-")
@@ -39,6 +41,8 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.min_price is not None:
         db.MIN_PRICE = args.min_price
+    if db.restore_if_missing(args.db):
+        print(f"Restored your database from the backup in {db.BACKUP_DIR}")
 
     if args.cmd == "serve":
         import logging
@@ -82,6 +86,13 @@ def main(argv=None):
             print(" -", r)
         if m.get("source") == "local":
             print(f"(eBay unreachable: {m['error']} Used your saved data instead.)")
+        return 0
+    if args.cmd == "backup":
+        where = db.backup(conn, args.folder)
+        if not where:
+            print("No backup folder. Pass one, or set DATASELL_BACKUP_DIR.", file=sys.stderr)
+            return 1
+        print(f"Backed up to {where}")
         return 0
     if args.cmd == "prune":
         print(f"Deleted {db.prune_below(conn)} listings under ${db.MIN_PRICE:g}")

@@ -75,6 +75,10 @@ def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
                     db.update_search(conn, s["id"], last_run_at=db._now(), last_error=str(e))
             if brand_checks:
                 errors += _refresh_brand_checks(conn, brand_check, brand_checks, delay_between)
+            try:
+                db.backup(conn)
+            except OSError as e:
+                errors.append(f"Backup to {db.BACKUP_DIR} failed: {e}")
             db.finish_run(conn, run_id, len(searches), totals, errors)
             log.info("Daily pull (%s): %d searches, %d added, %d updated, %d errors",
                      trigger, len(searches), totals["added"], totals["updated"], len(errors))
