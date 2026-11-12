@@ -23,7 +23,38 @@ python -m datasell serve --host 0.0.0.0   # open http://<this computer's IP>:500
 `--host 0.0.0.0` lets your phone open the app when it's on the same Wi-Fi. Leave it out to use
 the app only on the computer itself.
 
-## Run it on an Android phone (data stays on the phone)
+## Install the Android app (easiest)
+
+Datasell is an ordinary Android app (Android 10 or newer). Everything runs on the phone: the
+app, your database, photo checks and the nightly eBay pull over your Wi-Fi.
+
+1. On your phone, open
+   **github.com/josuenieves1995-star/Datasell/releases/tag/android-latest** and tap
+   **Datasell.apk** to download it. (The repository must be public, or you must be signed in to
+   GitHub in the browser.)
+2. Open the downloaded file and tap **Install**. The first time, Android asks you to allow
+   installing apps from your browser: tap **Settings → Allow from this source**, then go back.
+   If Play Protect warns about an unknown app, tap **More details → Install anyway**.
+3. Open **Datasell**, go to **Settings** in the menu, and paste your Claude API key (from
+   console.anthropic.com) to turn on photo checks.
+4. Optional, for the most reliable nightly update: Android **Settings → Apps → Datasell →
+   Battery → Unrestricted**.
+
+**Your data** stays in the app's storage on the phone. After each nightly update (and whenever you
+leave the app) a backup `datasell.db` and a spreadsheet `datasell_solds.csv` are saved to
+**Documents/Datasell**, which you can open in the Files app and which is kept if the app is
+uninstalled. **Settings → Restore from backup** brings it back on a new phone or after a
+reinstall.
+
+**Updating:** download the newest **Datasell.apk** from the same link and install it over the old
+one. Every push to the code builds a new APK automatically (GitHub Actions, `android/`). If
+Android says the update "conflicts with an existing package", the new version was signed with a
+different key: tap **Settings → Back up now** in the old app, uninstall it, install the new one
+and use **Restore from backup**. To avoid that for good, add a permanent signing key as
+repository secrets (`DATASELL_KEYSTORE_B64` = the keystore file in base64,
+`DATASELL_KEYSTORE_PASSWORD`, `DATASELL_KEY_ALIAS`).
+
+## Alternative: run it in Termux on Android
 
 Everything runs on the phone using the free **Termux** app: the app, your database, photo checks
 and the nightly eBay pull (over your Wi-Fi). Nothing depends on a computer.
@@ -234,6 +265,9 @@ python -m pytest
 - `datasell/market.py` – eBay comps and sell-through checks
 - `datasell/appraise.py` – Buy / Maybe / Pass rules
 - `datasell/app.py` – Flask web UI and JSON API
+- `android/` – the Android app: a WebView shell that runs the Python app with Chaquopy, the
+  Claude call via the Anthropic Java SDK, nightly WorkManager job and backups
+- `datasell/android.py` – Python entry points the Android app calls
 - `termux/` – Android (Termux) setup, start, stop and update scripts
 - `tests/` – tests with saved HTML fixtures
 
