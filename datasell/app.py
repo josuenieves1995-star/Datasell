@@ -26,7 +26,6 @@ def create_app(db_path: str | None = None) -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # two phone photos
     # Swappable in tests.
     app.config["IDENTIFY"] = vision.identify
-    app.config["MARKET_CHECK"] = market.check
 
     def conn():
         if "conn" not in g:
@@ -45,7 +44,10 @@ def create_app(db_path: str | None = None) -> Flask:
 
     @app.context_processor
     def globals_():
-        return {"min_price": db.MIN_PRICE, "fast_str": market.FAST_STR, "ok_str": market.OK_STR}
+        return {"min_price": db.MIN_PRICE, "fast_str": market.FAST_STR, "ok_str": market.OK_STR,
+                # The phone app doesn't load eBay pages itself, so the pages built on
+                # automatic eBay pulls are left out of its menu.
+                "simple_menu": app.config.get("ANDROID", False)}
 
     def run_scrape(urls: list[str], pages: int) -> tuple[dict, list[str]]:
         totals = {"added": 0, "updated": 0, "skipped": 0, "below_min": 0}
@@ -188,19 +190,23 @@ def create_app(db_path: str | None = None) -> Flask:
         except ValueError:
             return None
 
-    def _evaluate(query: str, ident: dict, cost: float | None) -> tuple[dict, dict]:
-        """Market check + verdict. Falls back to the broad query if the exact one has no comps."""
-        check = app.config["MARKET_CHECK"]
-        m = appraise.run_market(query, conn(), ident, check=check)
-        broad = (ident.get("broad_query") or "").strip()
-        if m.get("source") == "ebay" and not m.get("median_price") and broad and broad != query:
-            m = appraise.run_market(broad, conn(), ident, check=check)
-            m["note"] = f"No sales for “{query}”, so these are comps for “{broad}”."
-        v = appraise.verdict(m, cost, ident.get("confidence", "high"), ident.get("red_flags"))
-        m.pop("comps_min", None)
-        return m, v
+    def _parse_int(raw: str | None) -> int | None:
+        try:
+            return max(0, int(str(raw).replace(",", "").strip())) if raw not in (None, "") else None
+        except ValueError:
+            return None
 
-    def _save_result(appraisal_id: int | None, query: str, ident: dict, cost, m: dict, v: dict, **extra):
+    def _evaluate(query: str, ident: dict, cost: float | None, price: float | None = None,
+                  sold: int | None = None, active: int | None = None) -> tuple[dict, dict | None]:
+        """eBay links for the seller to open, plus a verdict once they enter what they saw."""
+        m = appraise.manual_check(query, price, sold, active)
+        if price is None:
+            return m, None
+        return m, appraise.verdict(m, cost, ident.get("confidence", "high"), ident.get("red_flags"))
+
+    def _save_result(appraisal_id: int | None, query: str, ident: dict, cost, m: dict, v: dict | None, **extra):
+        v = v or {"verdict": None, "reasons": [], "est_price": None, "list_price": None,
+                  "max_buy": None, "profit": None}
         fields = dict(ident=ident, query=m.get("query") or query, cost=cost, verdict=v["verdict"],
                       reasons=v["reasons"], est_price=v["est_price"], list_price=v["list_price"],
                       max_buy=v["max_buy"], profit=v["profit"], str=m.get("str"), market=m, **extra)
@@ -248,14 +254,18 @@ def create_app(db_path: str | None = None) -> Flask:
 
     @app.post("/check/<int:appraisal_id>/recheck")
     def recheck(appraisal_id: int):
+        """The seller entered what eBay shows (and/or fixed the search)."""
         a = db.get_appraisal(conn(), appraisal_id)
         if not a:
             abort(404)
         query = request.form.get("query", "").strip() or a["query"]
         cost = _parse_cost(request.form.get("cost")) if "cost" in request.form else a["cost"]
-        # The seller confirmed the search, so the ID is no longer in doubt.
-        ident = dict(a["ident"], search_query=query, broad_query="", confidence="high")
-        m, v = _evaluate(query, ident, cost)
+        price = _parse_cost(request.form.get("price"))
+        sold = _parse_int(request.form.get("sold"))
+        active = _parse_int(request.form.get("active"))
+        # The seller looked at the listings themselves, so the ID is confirmed.
+        ident = dict(a["ident"], confidence="high")
+        m, v = _evaluate(query, ident, cost, price, sold, active)
         _save_result(appraisal_id, query, a["ident"], cost, m, v)
         return redirect(url_for("check_result", appraisal_id=appraisal_id))
 

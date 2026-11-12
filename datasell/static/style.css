@@ -97,3 +97,7 @@ details summary { cursor: pointer; font-weight: 600; }
 .reasons li { margin: 4px 0; }
 .copy-row { display: flex; gap: 8px; }
 code { font-size: 13px; background: var(--tag); padding: 1px 5px; border-radius: 4px; }
+.verdict-box.check { background: var(--tag); color: var(--accent); }
+.verdict-chip.check { background: var(--tag); color: var(--muted); }
+.link-buttons { display: grid; gap: 8px; }
+.link-buttons .btn { text-align: center; }

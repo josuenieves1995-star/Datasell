@@ -15,11 +15,13 @@
     <a class="logo" href="{{ url_for('browse') }}">Datasell</a>
     <nav>
       <a href="{{ url_for('check_item') }}" class="{{ 'active' if request.endpoint in ('check_item', 'check_result') }}">Check item</a>
+      {% if not simple_menu %}
       <a href="{{ url_for('fast_sellers') }}" class="{{ 'active' if request.endpoint == 'fast_sellers' }}">Fast sellers</a>
       <a href="{{ url_for('browse') }}" class="{{ 'active' if request.endpoint == 'browse' }}">Solds</a>
       <a href="{{ url_for('searches') }}" class="{{ 'active' if request.endpoint == 'searches' }}">Daily updates</a>
       <a href="{{ url_for('stats_page') }}" class="{{ 'active' if request.endpoint == 'stats_page' }}">Price stats</a>
       <a href="{{ url_for('add') }}" class="{{ 'active' if request.endpoint == 'add' }}">Add URLs</a>
+      {% endif %}
       <a href="{{ url_for('settings_page') }}" class="{{ 'active' if request.endpoint == 'settings_page' }}">Settings</a>
     </nav>
   </div>

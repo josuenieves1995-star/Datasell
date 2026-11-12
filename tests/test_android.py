@@ -50,6 +50,7 @@ def test_start_serves_app_and_uses_phone_storage(phone):
     html = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
         f"http://127.0.0.1:{port}/settings").read().decode()
     assert "Back up now" in html and "Documents/Datasell" in html
+    assert "Fast sellers" not in html and "Daily updates" not in html  # simple phone menu
     assert db.DEFAULT_DB == os.path.join(phone, "datasell.db")
     urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f"http://127.0.0.1:{port}/check").read()
     assert os.path.exists(os.path.join(phone, "datasell.db"))
@@ -124,13 +125,11 @@ def test_settings_page_saves_key(tmp_path, monkeypatch):
 
 
 def test_browser_made_thumbnail_is_used(tmp_path, monkeypatch):
-    from test_check import IDENT, fake_ebay, jpeg
-    from datasell import market
+    from test_check import IDENT, jpeg
     import io
     app = create_app(str(tmp_path / "t.db"))
     app.testing = True
     app.config["IDENTIFY"] = lambda f, t, h="": dict(IDENT)
-    app.config["MARKET_CHECK"] = lambda q: market.check(q, fetch_page=fake_ebay()[0])
     thumb = "data:image/jpeg;base64,/9j/THUMB"
     c = app.test_client()
     c.post("/check", data={"front": (io.BytesIO(jpeg()), "f.jpg"), "front_thumb": thumb},

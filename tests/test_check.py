@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
@@ -243,23 +244,39 @@ def client(tmp_path):
     app = create_app(str(tmp_path / "web.db"))
     app.testing = True
     app.config["IDENTIFY"] = lambda front, tag, hint="": dict(IDENT)
-    app.config["MARKET_CHECK"] = lambda q: market.check(q, fetch_page=fake_ebay()[0])
     return app.test_client()
 
 
-def test_photo_check_flow(client):
+def test_photo_check_flow(client, monkeypatch):
+    # The check must never load eBay pages itself; the seller opens the links.
+    from datasell import scraper
+    monkeypatch.setattr(scraper, "fetch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("fetched eBay")))
     assert b"Is it worth it?" in client.get("/check").data
     r = client.post("/check", data={"front": (io.BytesIO(jpeg()), "front.jpg"),
                                     "tag": (io.BytesIO(jpeg("white")), "tag.jpg"), "cost": "8"},
                     content_type="multipart/form-data", follow_redirects=True)
     html = r.data.decode()
-    assert "Buy it" in html and "60%" in html and "Patagonia" in html and "$45.12" in html
+    assert "Check the solds" in html and "Patagonia" in html and "Retro-X" in html
     assert "data:image/jpeg;base64," in html
-    # The $30+ comps were added to the database.
-    assert client.get("/api/listings").get_json()["total"] == 7
-    # Fix the search and re-check with a higher cost.
-    r = client.post("/check/1/recheck", data={"query": "patagonia retro x vest", "cost": "50"}, follow_redirects=True)
-    assert "Pass" in r.data.decode() and "patagonia retro x vest" in r.data.decode()
+    # Links to the $30+ pre-owned sold search, newest first, and the live listings.
+    sold_link = re.search(r'href="(https://www.ebay.com/sch/i.html\?[^"]+)"', html).group(1).replace("&amp;", "&")
+    q = parse_qs(urlparse(sold_link).query)
+    assert q["_nkw"] == ["Patagonia Retro X Fleece Jacket"] and q["LH_Sold"] == ["1"] and q["_udlo"] == ["30"]
+    assert q["LH_ItemCondition"] == ["3000"] and q["_sop"] == ["13"]
+    assert "for sale now" in html and "All solds" in html
+
+    # The seller reads the solds and enters what they saw.
+    r = client.post("/check/1/recheck", data={"price": "62.50", "sold": "60", "active": "40", "cost": "8"},
+                    follow_redirects=True)
+    html = r.data.decode()
+    assert "Buy it" in html and "60%" in html and "$45.12" in html and "fast" in html
+    # Sold price under $30 -> pass, with no counts the speed is unknown -> at best maybe.
+    assert "Pass" in client.post("/check/1/recheck", data={"price": "22"}, follow_redirects=True).data.decode()
+    html = client.post("/check/1/recheck", data={"price": "60", "cost": ""}, follow_redirects=True).data.decode()
+    assert "Maybe" in html and "how many sold" in html and "max to pay" in html
+    # Fixing the search updates the links.
+    html = client.post("/check/1/recheck", data={"query": "patagonia retro x vest"}, follow_redirects=True).data.decode()
+    assert "patagonia+retro+x+vest" in html
     assert b"Recent checks" in client.get("/check").data
     client.post("/check/1/delete")
     assert b"Recent checks" not in client.get("/check").data
@@ -267,12 +284,20 @@ def test_photo_check_flow(client):
 
 def test_text_check_and_errors(client):
     r = client.post("/check", data={"query": "patagonia retro x"}, follow_redirects=True)
-    assert "Buy it" in r.data.decode() and "max to pay" in r.data.decode()
+    assert "Check the solds" in r.data.decode() and "patagonia+retro+x" in r.data.decode()
     r = client.post("/check", data={}, follow_redirects=True)
     assert b"Add a photo" in r.data
     r = client.post("/check", data={"front": (io.BytesIO(b"junk"), "x.jpg")},
                     content_type="multipart/form-data", follow_redirects=True)
     assert b"use a JPEG or PNG" in r.data
+
+
+def test_manual_check_numbers():
+    m = appraise.manual_check("carhartt b17", 48, 1200, 800)
+    assert m["str"] == 0.6 and m["speed"] == "Fast" and "_udlo=30" in m["sold_url"]
+    v = appraise.verdict(m, cost=10)
+    assert v["verdict"] == "BUY" and v["profit"] == 30.8
+    assert appraise.verdict(appraise.manual_check("x", 48, 100, 900))["verdict"] == "PASS"
 
 
 def test_fast_sellers_and_presets(client):

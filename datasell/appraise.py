@@ -54,13 +54,17 @@ def verdict(m: dict, cost: float | None = None, confidence: str = "high",
         if share:
             msg += f" (only {share:.0%} of sales were ${floor:g}+)"
         reasons.append(msg + ".")
-    else:
+    elif m.get("p25_price") is not None:
         reasons.append(f"Typical sale {_money(price)} (middle half {_money(m.get('p25_price'))}–"
                        f"{_money(m.get('p75_price'))}).")
+    else:
+        reasons.append(f"Typical sale {_money(price)}, at or above your ${floor:g} minimum.")
 
     if str_ is None:
         lower("MAYBE")
-        reasons.append("Sell-through rate unknown (eBay couldn't be checked).")
+        reasons.append("Add how many sold and how many are listed to see how fast it sells."
+                       if m.get("source") == "manual" else
+                       "Sell-through rate unknown (eBay couldn't be checked).")
     else:
         sold, active = m.get("sold_min_count"), m.get("active_min_count")
         detail = f"{str_:.0%} sell-through at ${floor:g}+ ({sold} sold in ~90 days vs {active} listed)"
@@ -106,6 +110,35 @@ def verdict(m: dict, cost: float | None = None, confidence: str = "high",
         "max_buy": round(max(0, price * (1 - FEE_RATE) - MIN_PROFIT), 2) if price is not None else None,
         "profit": profit,
     }
+
+
+def ebay_links(query: str) -> dict:
+    """eBay searches for the seller to open: $30+ pre-owned solds (newest first),
+    all solds, and the $30+ live listings."""
+    return {
+        "query": query,
+        "source": "manual",
+        "min_price": db.MIN_PRICE,
+        "sold_url": market.search_url(query, True, db.MIN_PRICE),
+        "sold_all_url": market.search_url(query, True, None),
+        "active_url": market.search_url(query, False, db.MIN_PRICE),
+    }
+
+
+def manual_check(query: str, price: float | None = None, sold: int | None = None,
+                 active: int | None = None) -> dict:
+    """Market data the seller read off eBay: typical sold price and the result
+    counts at the top of the $30+ sold and active searches."""
+    m = ebay_links(query)
+    m.update({
+        "median_price": price,
+        "sold_min_count": sold,
+        "active_min_count": active,
+        "sold_count": sold,
+        "str": market.sell_through(sold, active),
+    })
+    m["speed"] = market.speed_label(m["str"])
+    return m
 
 
 def run_market(query: str, conn=None, ident: dict | None = None, check=market.check) -> dict:

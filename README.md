@@ -103,6 +103,16 @@ Documents backup automatically the next time it starts. To move to a new phone, 
 
 ## Check an item (Buy / Maybe / Pass)
 
+> **How the check works now:** eBay blocks apps that load its pages automatically (it answers
+> "HTTP 403"), so the check doesn't fetch eBay itself. Claude identifies the item from your photos,
+> the app gives you one-tap links to the matching **$30+ pre-owned sold search** and **live
+> listings** (they open in the eBay app), and you type back the typical sold price and the two
+> result counts. The verdict, sell-through, max to pay and profit are worked out from those. The
+> pages built on automatic eBay pulls (Fast sellers, Daily updates, Solds, Price stats) are hidden
+> in the phone app. Getting the numbers automatically needs eBay's official developer API.
+
+The details below describe the full desktop version.
+
 Open **Check item** on your phone, tap **Front of item** and **Tag** to take the two photos,
 optionally enter what it costs, and tap **Check it** (about 20–40 seconds). You get:
 

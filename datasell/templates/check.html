@@ -31,7 +31,7 @@
   <input type="hidden" name="tag_thumb" id="tag_thumb">
   <div style="margin-top:14px"><button id="check-btn" style="width:100%">Check it</button></div>
   <p class="muted" id="check-wait" style="display:none;text-align:center;margin:10px 0 0">
-    Reading the tag and checking eBay solds… this takes about 20–40 seconds.</p>
+    Reading the photos… this takes about 10–30 seconds.</p>
 </form>
 
 {% if history %}
@@ -44,7 +44,7 @@
       <div style="font-weight:600;overflow-wrap:anywhere">{{ a.ident.listing_title or a.query }}</div>
       <div class="muted" style="font-size:13px">{{ a.est_price|money }}{% if a.str is not none %} · {{ '%d' % (a.str * 100) }}% sell-through{% endif %} · {{ a.created_at[:10] }}</div>
     </div>
-    <span class="verdict-chip {{ a.verdict|lower }}">{{ a.verdict }}</span>
+    <span class="verdict-chip {{ (a.verdict or 'check')|lower }}">{{ a.verdict or 'Check' }}</span>
   </a>
   {% endfor %}
 </div>

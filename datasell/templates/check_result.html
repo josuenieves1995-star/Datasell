@@ -1,29 +1,53 @@
 {% extends "base.html" %}
-{% block title %}{{ a.verdict }} · {{ (ident.listing_title or a.query)[:30] }}{% endblock %}
+{% block title %}{{ a.verdict or 'Check' }} · {{ (ident.listing_title or a.query)[:30] }}{% endblock %}
 {% block content %}
 <p><a href="{{ url_for('check_item') }}">← Check another item</a></p>
 
+{% if a.verdict %}
 <div class="verdict-box {{ a.verdict|lower }}">
   <div class="verdict-word">{{ {'BUY': 'Buy it', 'MAYBE': 'Maybe', 'PASS': 'Pass'}[a.verdict] }}</div>
   <div class="verdict-sub">{{ ident.listing_title or a.query }}</div>
 </div>
-
 <div class="stats-row">
   <div class="stat"><b>{{ a.est_price|money }}</b><span>typical sale</span></div>
   <div class="stat"><b>{{ ('%d%%' % (a.str * 100)) if a.str is not none else '—' }}</b><span>sell-through at ${{ '%g' % min_price }}+{% if m.speed and m.speed != 'Unknown' %} · {{ m.speed|lower }}{% endif %}</span></div>
-  <div class="stat"><b>{{ a.list_price|money }}</b><span>list at</span></div>
   {% if a.profit is not none %}
   <div class="stat"><b>{{ a.profit|money }}</b><span>est. profit (cost {{ a.cost|money }})</span></div>
   {% else %}
   <div class="stat"><b>{{ a.max_buy|money }}</b><span>max to pay</span></div>
   {% endif %}
 </div>
+<div class="panel"><ul class="reasons">{% for r in a.reasons %}<li>{{ r }}</li>{% endfor %}</ul></div>
+{% else %}
+<div class="verdict-box check">
+  <div class="verdict-word">Check the solds</div>
+  <div class="verdict-sub">{{ ident.listing_title or a.query }}</div>
+</div>
+{% endif %}
 
 <div class="panel">
-  <ul class="reasons">{% for r in a.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-  {% if m.note %}<p class="muted" style="font-size:13px">{{ m.note }}</p>{% endif %}
-  {% if m.source == 'local' %}<p class="flash warn" style="font-size:13px">Couldn't reach eBay ({{ m.error }}), so this uses sales already in your database.</p>{% endif %}
+  <h2 style="margin-top:0">{{ '1. ' if not a.verdict }}Look it up on eBay</h2>
+  <div class="link-buttons">
+    <a class="btn" href="{{ m.sold_url }}" target="_blank" rel="noopener">${{ '%g' % min_price }}+ solds ↗</a>
+    <a class="btn secondary" href="{{ m.active_url }}" target="_blank" rel="noopener">${{ '%g' % min_price }}+ for sale now ↗</a>
+    <a class="btn secondary" href="{{ m.sold_all_url }}" target="_blank" rel="noopener">All solds ↗</a>
+  </div>
+  <p class="muted" style="font-size:13px;margin-bottom:0">Pre-owned, newest first. Search: “{{ m.query or a.query }}”</p>
 </div>
+
+<form class="panel" method="post" action="{{ url_for('recheck', appraisal_id=a.id) }}">
+  <h2 style="margin-top:0">{{ '2. ' if not a.verdict }}What did you see?</h2>
+  <p class="muted" style="font-size:13px;margin-top:0">The counts are at the top of each eBay search (“58 results”).
+    All optional except the price.</p>
+  <div class="form-grid">
+    <div><label>Typical sold price</label><input name="price" type="number" step="0.01" min="0" inputmode="decimal" value="{{ '%g' % a.est_price if a.est_price is not none else '' }}" placeholder="e.g. 45"></div>
+    <div><label>How many sold ($30+)</label><input name="sold" type="number" min="0" inputmode="numeric" value="{{ m.sold_min_count if m.sold_min_count is not none else '' }}"></div>
+    <div><label>How many for sale ($30+)</label><input name="active" type="number" min="0" inputmode="numeric" value="{{ m.active_min_count if m.active_min_count is not none else '' }}"></div>
+    <div><label>What it costs you</label><input name="cost" type="number" step="0.01" min="0" inputmode="decimal" value="{{ '%g' % a.cost if a.cost is not none else '' }}"></div>
+    <div class="full"><label>eBay search (fix it if it's the wrong item)</label><input name="query" value="{{ m.query or a.query }}"></div>
+  </div>
+  <div style="margin-top:12px"><button style="width:100%">{{ 'Update verdict' if a.verdict else 'Get verdict' }}</button></div>
+</form>
 
 {% if a.front_thumb or a.tag_thumb %}
 <div class="photo-row" style="margin-bottom:16px">
@@ -35,6 +59,7 @@
 {% if ident.brand or ident.item_type %}
 <div class="panel">
   <h2 style="margin-top:0">What Claude sees <span class="muted" style="font-weight:400;font-size:13px">· {{ ident.confidence }} confidence</span></h2>
+  {% if ident.red_flags %}<div class="flash warn">{% for f in ident.red_flags %}Watch out: {{ f }}<br>{% endfor %}</div>{% endif %}
   <table>
     {% for label, key in [('Brand','brand'), ('Line','sub_brand_or_line'), ('Item','item_type'), ('Department','department'), ('Size','size'), ('Color','color'), ('Material','material'), ('Made in','made_in'), ('RN / style #','rn_or_style_number'), ('Era','era'), ('Condition','condition_notes')] if ident[key] %}
     <tr><th style="width:35%">{{ label }}</th><td>{{ ident[key] }}</td></tr>
@@ -43,39 +68,8 @@
   </table>
   {% if ident.listing_title %}
   <label style="margin-top:12px">Suggested listing title</label>
-  <div class="copy-row"><input readonly value="{{ ident.listing_title }}" id="title-copy"><button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('title-copy').value);this.textContent='Copied'">Copy</button></div>
+  <div class="copy-row"><input readonly value="{{ ident.listing_title }}" id="title-copy"><button type="button" class="secondary" onclick="var i=document.getElementById('title-copy');i.select();try{navigator.clipboard.writeText(i.value)}catch(e){document.execCommand('copy')}this.textContent='Copied'">Copy</button></div>
   {% endif %}
-</div>
-{% endif %}
-
-<form class="panel" method="post" action="{{ url_for('recheck', appraisal_id=a.id) }}">
-  <h2 style="margin-top:0">Search used</h2>
-  <p class="muted" style="font-size:13px;margin-top:0">Not the right item? Fix the search and check again.</p>
-  <div class="form-grid">
-    <div class="full"><input name="query" value="{{ m.query or a.query }}"></div>
-    <div><label>Cost</label><input name="cost" type="number" step="0.01" min="0" value="{{ '%g' % a.cost if a.cost is not none else '' }}"></div>
-    <div><label>&nbsp;</label><button>Check again</button></div>
-  </div>
-  <p style="font-size:13px;margin-bottom:0">
-    {% if m.sold_url %}<a href="{{ m.sold_url }}" target="_blank" rel="noopener">eBay solds ↗</a> · {% endif %}
-    {% if m.active_url %}<a href="{{ m.active_url }}" target="_blank" rel="noopener">eBay active ↗</a>{% endif %}
-    {% if m.sold_min_count is not none %}<br><span class="muted">{{ m.sold_min_count }} sold at ${{ '%g' % min_price }}+ in ~90 days · {{ m.active_min_count }} listed now{% if m.sold_count is not none %} · {{ m.sold_count }} sold at any price{% endif %}</span>{% endif %}
-  </p>
-</form>
-
-{% if m.comps %}
-<h2>Sold comps</h2>
-<div class="grid">
-  {% for c in m.comps[:12] %}
-  <a class="card" href="{{ c.url }}" target="_blank" rel="noopener">
-    {% if c.image_url %}<img src="{{ c.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="noimg"></div>{% endif %}
-    <div class="body">
-      <div class="price">{{ c.price|money(c.currency) }}</div>
-      <div class="title">{{ c.title }}</div>
-      <div class="muted" style="font-size:12px">{% if c.sold_date %}Sold {{ c.sold_date }}{% endif %}</div>
-    </div>
-  </a>
-  {% endfor %}
 </div>
 {% endif %}
 
