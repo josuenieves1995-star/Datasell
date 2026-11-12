@@ -18,7 +18,8 @@ android {
         versionCode((System.getenv("DATASELL_VERSION_CODE") ?: "1") as int)
         versionName System.getenv("DATASELL_VERSION_NAME") ?: "dev"
         ndk {
-            abiFilters "arm64-v8a"   // every current Android phone
+            // arm64-v8a is every current Android phone; the emulator test adds x86_64.
+            abiFilters(*((System.getenv("DATASELL_ABIS") ?: "arm64-v8a").split(",")))
         }
     }
 
