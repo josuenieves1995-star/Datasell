@@ -11,6 +11,7 @@ import io
 import json
 import os
 
+from . import settings
 from .attributes import CATEGORIES
 
 MODEL = os.environ.get("DATASELL_MODEL", "claude-opus-5-5")
@@ -72,7 +73,21 @@ class IdentifyError(Exception):
 
 
 def api_configured() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    return bool(settings.api_key() or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+
+def prompt_text(hint: str = "") -> str:
+    text = "Identify this item for an eBay sold-comps search."
+    if hint:
+        text += f"\nThe seller's note (may help, may be wrong): {hint}"
+    return text
+
+
+def finish(result: dict) -> dict:
+    """Fill in a search query if Claude left it empty."""
+    if not result.get("search_query"):
+        result["search_query"] = result.get("broad_query") or result.get("item_type") or ""
+    return result
 
 
 # The API accepts images up to 5 MB once base64-encoded (about 3.75 MB raw).
@@ -124,14 +139,11 @@ def identify(front_jpeg: bytes, tag_jpeg: bytes | None, hint: str = "", client=N
     """Ask Claude what the item is. Images must already be prepared JPEGs."""
     import anthropic
 
-    client = client or anthropic.Anthropic()
+    client = client or anthropic.Anthropic(api_key=settings.api_key())
     content = [{"type": "text", "text": "Front of the item:"}, _image_block(front_jpeg)]
     if tag_jpeg:
         content += [{"type": "text", "text": "Tag:"}, _image_block(tag_jpeg)]
-    text = "Identify this item for an eBay sold-comps search."
-    if hint:
-        text += f"\nThe seller's note (may help, may be wrong): {hint}"
-    content.append({"type": "text", "text": text})
+    content.append({"type": "text", "text": prompt_text(hint)})
 
     try:
         response = client.beta.messages.create(
@@ -164,6 +176,4 @@ def identify(front_jpeg: bytes, tag_jpeg: bytes | None, hint: str = "", client=N
         result = json.loads(text)
     except json.JSONDecodeError as e:
         raise IdentifyError("Claude returned an unreadable answer. Please try again.") from e
-    if not result.get("search_query"):
-        result["search_query"] = result.get("broad_query") or result.get("item_type") or ""
-    return result
+    return finish(result)

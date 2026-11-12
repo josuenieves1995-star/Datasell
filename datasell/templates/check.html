@@ -3,8 +3,8 @@
 {% block content %}
 <h1>Is it worth it?</h1>
 {% if not api_ok %}
-<div class="flash warn">Photo checks need a Claude API key. Start the app with <code>ANTHROPIC_API_KEY</code> set
-  (see the README). You can still check an item by typing what it is below.</div>
+<div class="flash warn">Photo checks need a Claude API key. <a href="{{ url_for('settings_page') }}">Add it in Settings</a>.
+  You can still check an item by typing what it is below.</div>
 {% endif %}
 <form class="panel" method="post" enctype="multipart/form-data" id="check-form">
   <div class="photo-row">
@@ -27,6 +27,8 @@
     <summary>No photo? Type what it is</summary>
     <div style="margin-top:8px"><input name="query" placeholder="e.g. Patagonia Synchilla Snap-T fleece"></div>
   </details>
+  <input type="hidden" name="front_thumb" id="front_thumb">
+  <input type="hidden" name="tag_thumb" id="tag_thumb">
   <div style="margin-top:14px"><button id="check-btn" style="width:100%">Check it</button></div>
   <p class="muted" id="check-wait" style="display:none;text-align:center;margin:10px 0 0">
     Reading the tag and checking eBay solds… this takes about 20–40 seconds.</p>
@@ -49,10 +51,36 @@
 {% endif %}
 
 <script>
+// Shrink phone photos before upload: faster on mobile data, and the server
+// doesn't need an image library. Also makes a small preview for the history.
+function shrink(file, maxEdge, quality) {
+  return createImageBitmap(file).then(function (bmp) {
+    var scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
+    var c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return c;
+  });
+}
 document.querySelectorAll('input[type=file][data-preview]').forEach(function (inp) {
   inp.addEventListener('change', function () {
+    var file = inp.files && inp.files[0];
+    if (!file) return;
     var img = document.getElementById(inp.dataset.preview);
-    if (inp.files && inp.files[0]) { img.src = URL.createObjectURL(inp.files[0]); img.parentElement.classList.add('has-img'); }
+    img.src = URL.createObjectURL(file); img.parentElement.classList.add('has-img');
+    if (!window.createImageBitmap || !window.DataTransfer) return;  // send as-is
+    shrink(file, 1568, 0.85).then(function (c) {
+      document.getElementById(inp.name + '_thumb').value =
+        (function () { var t = document.createElement('canvas'); var s = Math.min(1, 420 / Math.max(c.width, c.height));
+          t.width = Math.round(c.width * s); t.height = Math.round(c.height * s);
+          t.getContext('2d').drawImage(c, 0, 0, t.width, t.height); return t.toDataURL('image/jpeg', 0.7); })();
+      c.toBlob(function (blob) {
+        if (!blob) return;
+        var dt = new DataTransfer();
+        dt.items.add(new File([blob], inp.name + '.jpg', { type: 'image/jpeg' }));
+        inp.files = dt.files;
+      }, 'image/jpeg', 0.85);
+    }).catch(function () { /* unsupported format: upload the original */ });
   });
 });
 document.getElementById('check-form').addEventListener('submit', function () {

@@ -1,0 +1,78 @@
+plugins {
+    id("com.android.application")
+    id("com.chaquo.python")
+}
+
+// The release signing key comes from environment variables (set by the GitHub
+// workflow); without them the build falls back to the debug key.
+def keystorePath = System.getenv("DATASELL_KEYSTORE")
+
+android {
+    namespace "com.datasell.app"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.datasell.app"
+        minSdk 29          // Android 10+, needed to save backups to Documents
+        targetSdk 35
+        versionCode((System.getenv("DATASELL_VERSION_CODE") ?: "1") as int)
+        versionName System.getenv("DATASELL_VERSION_NAME") ?: "dev"
+        ndk {
+            abiFilters "arm64-v8a"   // every current Android phone
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv("DATASELL_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("DATASELL_KEY_ALIAS")
+                keyPassword System.getenv("DATASELL_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystorePath ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    packaging {
+        resources {
+            excludes += [
+                "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*",
+                "META-INF/versions/9/module-info.class", "META-INF/*.kotlin_module",
+                "META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties",
+            ]
+        }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        pip {
+            install("flask")
+            install("requests")
+            install("beautifulsoup4")
+        }
+        // Flask reads the templates and static files from disk.
+        extractPackages("datasell", "certifi")
+    }
+}
+
+dependencies {
+    implementation "com.anthropic:anthropic-java:3.8.0"
+    implementation "androidx.work:work-runtime:2.10.0"
+    implementation "androidx.core:core:1.13.1"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+}

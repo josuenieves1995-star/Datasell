@@ -29,6 +29,10 @@ BRAND_CHECKS = int(os.environ.get("DATASELL_BRAND_CHECKS", "10"))
 # Only one pull at a time, whether scheduled or started with "Run now".
 _run_lock = threading.Lock()
 
+# Functions called with the summary after every finished run (the Android app
+# uses this to copy the backup into the phone's Documents folder).
+on_finished: list = []
+
 
 def is_running() -> bool:
     return _run_lock.locked()
@@ -82,9 +86,15 @@ def run_saved_searches(db_path: str | None = None, trigger: str = "manual",
             db.finish_run(conn, run_id, len(searches), totals, errors)
             log.info("Daily pull (%s): %d searches, %d added, %d updated, %d errors",
                      trigger, len(searches), totals["added"], totals["updated"], len(errors))
-            return {"run_id": run_id, "searches": len(searches), **totals, "errors": errors}
+            summary = {"run_id": run_id, "searches": len(searches), **totals, "errors": errors}
         finally:
             conn.close()
+        for hook in list(on_finished):
+            try:
+                hook(summary)
+            except Exception:
+                log.exception("on_finished hook failed")
+        return summary
     finally:
         _run_lock.release()
 
@@ -153,6 +163,21 @@ def is_due(now: datetime, last_run_iso: str | None, at: str = DAILY_AT) -> bool:
     return last.astimezone(now.tzinfo) < slot
 
 
+def run_if_due(db_path: str | None = None, at: str = DAILY_AT, tz: str | None = TZ) -> dict | None:
+    """Run the scheduled update if today's (or a missed) run is due.
+
+    Safe to call often: it does nothing when the update already ran.
+    """
+    conn = db.connect(db_path)
+    try:
+        last = db.last_scheduled_run(conn)
+    finally:
+        conn.close()
+    if not is_due(_now(tz), last["started_at"] if last else None, at):
+        return None
+    return run_saved_searches(db_path, trigger="schedule")
+
+
 class DailyScheduler(threading.Thread):
     """Background thread that runs the daily pull once a day."""
 
@@ -170,11 +195,7 @@ class DailyScheduler(threading.Thread):
         log.info("Daily pull scheduled at %s (%s)", self.at, self.tz or "server local time")
         while not self._stop_event.is_set():
             try:
-                conn = db.connect(self.db_path)
-                last = db.last_scheduled_run(conn)
-                conn.close()
-                if is_due(_now(self.tz), last["started_at"] if last else None, self.at):
-                    run_saved_searches(self.db_path, trigger="schedule")
+                run_if_due(self.db_path, self.at, self.tz)
             except Exception:  # keep the scheduler alive no matter what
                 log.exception("Daily pull failed")
             self._stop_event.wait(self.check_every)

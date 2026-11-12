@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<form class="panel" method="post">
+  <h2 style="margin-top:0">Claude API key</h2>
+  <p class="muted" style="font-size:14px;margin-top:0">Needed for photo checks. Get one at
+    <b>console.anthropic.com</b> → API keys. It's stored only on this device. Each photo check costs a few cents.</p>
+  {% if key_source == 'environment' %}
+    <p>Using the key from the <code>ANTHROPIC_API_KEY</code> environment variable ({{ key_hint }}).</p>
+  {% else %}
+    {% if key_hint %}<p>Saved key: <code>{{ key_hint }}</code></p>{% endif %}
+    <label>{{ 'Replace key' if key_hint else 'Paste your key' }}</label>
+    <input name="api_key" type="password" autocomplete="off" placeholder="sk-ant-…">
+    <div class="actions" style="margin-top:10px">
+      <button>Save key</button>
+      {% if key_hint %}<button class="secondary" name="remove_key" value="1" onclick="return confirm('Remove the saved key?')">Remove key</button>{% endif %}
+    </div>
+  {% endif %}
+</form>
+
+<div class="panel">
+  <h2 style="margin-top:0">Your data</h2>
+  <p style="font-size:14px">Database: <code style="overflow-wrap:anywhere">{{ db_path }}</code></p>
+  {% if android %}
+    <p class="muted" style="font-size:14px">Everything stays on this phone. After each nightly update a backup
+      (<code>datasell.db</code>) and a spreadsheet of your solds (<code>datasell_solds.csv</code>) are saved to
+      <b>Documents/Datasell</b>, which you can see in the Files app and which is kept if the app is uninstalled.</p>
+    <div class="actions">
+      <button type="button" onclick="DatasellAndroid.backupNow()">Back up now</button>
+      <button type="button" class="secondary" onclick="if (confirm('Replace everything in the app with a backup file?')) DatasellAndroid.restoreBackup()">Restore from backup</button>
+    </div>
+  {% elif backup %}
+    <p class="muted" style="font-size:14px">Backup: {{ 'last saved ' ~ backup.at if backup.at else 'not saved yet' }} to
+      <code>{{ backup.folder }}</code></p>
+  {% endif %}
+</div>
+{% endblock %}

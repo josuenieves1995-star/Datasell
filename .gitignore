@@ -4,3 +4,10 @@ __pycache__/
 *.db
 *.sqlite3
 .pytest_cache/
+# Android build
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/python/
+android/*.jks

@@ -9,7 +9,7 @@ import threading
 
 from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import appraise, daily, db, market, vision
+from . import appraise, daily, db, market, settings, vision
 from .scraper import ScrapeError, is_search_url, parse_html, scrape_url
 
 PER_PAGE = 48
@@ -170,11 +170,15 @@ def create_app(db_path: str | None = None) -> Flask:
 
     # ------------------------------------------------------------ photo check
 
-    def _thumb(jpeg: bytes) -> str | None:
+    def _thumb(jpeg: bytes, posted: str | None = None) -> str | None:
+        """Small preview for the history list. The page makes one in the browser;
+        otherwise Pillow makes it here. Never store full photos (too big)."""
+        if posted and posted.startswith("data:image/jpeg;base64,") and len(posted) < 120_000:
+            return posted
         try:
             import PIL  # noqa: F401
         except ImportError:
-            return None  # no thumbnails without Pillow; full photos would bloat the database
+            return None
         small = vision.prepare_image(jpeg, max_edge=420, quality=70)
         return "data:image/jpeg;base64," + base64.b64encode(small).decode()
 
@@ -230,8 +234,9 @@ def create_app(db_path: str | None = None) -> Flask:
             return redirect(url_for("check_item"))
         query = ident.get("search_query", "")
         m, v = _evaluate(query, ident, cost)
-        aid = _save_result(None, query, ident, cost, m, v, front_thumb=_thumb(front_jpeg),
-                           tag_thumb=_thumb(tag_jpeg) if tag_jpeg else None)
+        aid = _save_result(None, query, ident, cost, m, v,
+                           front_thumb=_thumb(front_jpeg, request.form.get("front_thumb")),
+                           tag_thumb=_thumb(tag_jpeg, request.form.get("tag_thumb")) if tag_jpeg else None)
         return redirect(url_for("check_result", appraisal_id=aid))
 
     @app.get("/check/<int:appraisal_id>")
@@ -258,6 +263,29 @@ def create_app(db_path: str | None = None) -> Flask:
     def delete_check(appraisal_id: int):
         db.delete_appraisal(conn(), appraisal_id)
         return redirect(url_for("check_item"))
+
+    # ------------------------------------------------------------ settings
+
+    @app.route("/settings", methods=["GET", "POST"])
+    def settings_page():
+        if request.method == "POST":
+            if request.form.get("remove_key"):
+                settings.save(anthropic_api_key=None)
+                flash("API key removed.", "ok")
+            else:
+                key = request.form.get("api_key", "").strip()
+                if key and not key.startswith("sk-ant-"):
+                    flash("That doesn't look like a Claude API key (they start with sk-ant-).", "error")
+                elif key:
+                    settings.save(anthropic_api_key=key)
+                    flash("API key saved. Photo checks are ready.", "ok")
+            return redirect(url_for("settings_page"))
+        key = settings.api_key()
+        return render_template(
+            "settings.html", key_source=settings.api_key_source(),
+            key_hint=(key[:10] + "…" + key[-4:]) if key else None,
+            db_path=os.path.abspath(db.DEFAULT_DB), backup=db.last_backup(),
+            android=app.config.get("ANDROID", False))
 
     # ------------------------------------------------------------ fast sellers
 

@@ -1,0 +1,83 @@
+name: Android app
+
+on:
+  push:
+    branches: [main, claude/ebay-clothing-db]
+    paths: ["datasell/**", "android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to publish the APK as a release
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Chaquopy needs the same Python version as the app (3.13) on the build machine.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Add the Datasell Python code to the app
+        run: |
+          mkdir -p android/app/src/main/python
+          rm -rf android/app/src/main/python/datasell
+          cp -r datasell android/app/src/main/python/datasell
+          find android/app/src/main/python -name "__pycache__" -prune -exec rm -rf {} +
+
+      # Optional: a permanent signing key kept in the repository's secrets, so
+      # new versions install over old ones. Without it the APK is signed with a
+      # throwaway key (see the README).
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.DATASELL_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/datasell.jks"
+            echo "DATASELL_KEYSTORE=$RUNNER_TEMP/datasell.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the APK
+        working-directory: android
+        env:
+          DATASELL_KEYSTORE_PASSWORD: ${{ secrets.DATASELL_KEYSTORE_PASSWORD }}
+          DATASELL_KEY_ALIAS: ${{ secrets.DATASELL_KEY_ALIAS }}
+          DATASELL_KEY_PASSWORD: ${{ secrets.DATASELL_KEYSTORE_PASSWORD }}
+          DATASELL_VERSION_CODE: ${{ github.run_number }}
+          DATASELL_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Rename
+        run: cp android/app/build/outputs/apk/release/app-release.apk Datasell.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Datasell-apk
+          path: Datasell.apk
+
+      # Always available at .../releases/download/android-latest/Datasell.apk
+      - name: Publish as the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest Datasell.apk \
+            --title "Datasell for Android (version 1.0.${{ github.run_number }})" \
+            --notes "Download **Datasell.apk** below on your Android phone and open it to install. Built from ${{ github.sha }}." \
+            --target "${{ github.sha }}" --latest
